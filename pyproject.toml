@@ -12,6 +12,7 @@ dependencies = [
     "datasets",
     "einops",
     "huggingface_hub",
+    "iopath",
     "ipython",
     "jupyter",
     "jupyterlab",
@@ -24,6 +25,7 @@ dependencies = [
     "pytest",
     "scikit-learn",
     "scipy",
+    "simplejson",
     "timm",
     "torch==2.4.1",
     "torchdata",
@@ -34,6 +36,9 @@ dependencies = [
     "wandb",
     "webdataset",
 ]
+
+[tool.setuptools.packages.find]
+include = []
 
 [tool.setuptools_scm]
 version_file = "_version.py"

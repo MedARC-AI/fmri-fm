@@ -7,7 +7,7 @@
 # Position embedding utils
 # --------------------------------------------------------
 
-import mae_st.util.logging as logging
+import util.logging as logging
 import numpy as np
 import torch
 

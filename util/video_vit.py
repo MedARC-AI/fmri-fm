@@ -2,10 +2,10 @@
 # All rights reserved.
 
 
-import mae_st.util.logging as logging
+import util.logging as logging
 import torch
 import torch.nn as nn
-from timm.models.layers import to_2tuple
+from timm.layers import to_2tuple
 from timm.models.vision_transformer import DropPath, Mlp
 
 
@@ -46,13 +46,14 @@ class PatchEmbed(nn.Module):
         )
         self.img_size = img_size
         self.patch_size = patch_size
+        self.in_chans = in_chans
 
         self.frames = frames
         self.t_patch_size = t_patch_size
 
         self.num_patches = num_patches
 
-        self.grid_size = img_size[0] // patch_size[0]
+        self.grid_size = img_size[0] // patch_size[0], img_size[1] // patch_size[1]
         self.t_grid_size = frames // t_patch_size
 
         kernel_size = [t_patch_size] + list(patch_size)
@@ -80,7 +81,6 @@ class Attention(nn.Module):
         qk_scale=None,
         attn_drop=0.0,
         proj_drop=0.0,
-        input_size=(4, 14, 14),
     ):
         super().__init__()
         assert dim % num_heads == 0, "dim should be divisible by num_heads"
@@ -94,8 +94,6 @@ class Attention(nn.Module):
         assert attn_drop == 0.0  # do not use
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        self.input_size = input_size
-        assert input_size[1] == input_size[2]
 
     def forward(self, x):
         B, N, C = x.shape
