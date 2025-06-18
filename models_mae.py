@@ -470,6 +470,51 @@ class MaskedAutoencoderViT(nn.Module):
         loss = self.forward_loss(imgs, pred, mask, img_mask)
         return loss, pred, mask
 
+    @torch.no_grad()
+    def forward_masked_recon(self, imgs, pred, mask):
+        # imgs: [N, C, T, H, W]
+        # pred: [N, t*h*w, u*p*p*C]
+        # mask: [N, t*h*w], 0 is keep, 1 is remove,
+        N, C, T, H, W = imgs.shape
+        t_step = self.patch_embed.t_patch_size // self.t_pred_patch_size
+        t_indices = torch.arange(0, T, t_step, device=imgs.device)
+        target = torch.index_select(imgs, 2, t_indices)
+
+        # this caches patch info for unpatchify
+        # necessary if batch size is different from training
+        self.patchify(target)
+
+        target = torch.einsum("ncthw->nthwc", target)
+
+        pred = self.unpatchify(pred)
+        pred = torch.einsum("ncthw->nthwc", pred)
+
+        ph, pw = self.patch_embed.patch_size
+        mask = mask.unsqueeze(-1).repeat(1, 1, ph * pw * C)  # (N, T*H*W, p*p*c)
+        mask = self.unpatchify(mask)  # 1 is removing, 0 is keeping
+        mask = torch.einsum("ncthw->nthwc", mask)
+
+        # masked image
+        im_masked = target * (1 - mask)
+
+        # MAE reconstruction pasted with visible patches
+        im_paste = target * (1 - mask) + pred * mask
+        return target, pred, mask, im_masked, im_paste
+
+
+def mae_vit_small_patch16(**kwargs):
+    # nb, decoder is fixed across encoder sizes to embed dim 512.
+    model = MaskedAutoencoderViT(
+        patch_size=16,
+        embed_dim=384,
+        depth=12,
+        num_heads=6,
+        mlp_ratio=4,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
+        **kwargs,
+    )
+    return model
+
 
 def mae_vit_base_patch16(**kwargs):
     model = MaskedAutoencoderViT(

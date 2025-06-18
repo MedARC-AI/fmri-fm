@@ -137,6 +137,7 @@ def make_flat_transform(
     clip_vmax: float | None = 3.0,
     normalize: bool = True,
     masking: str | None = None,
+    masking_kwargs: dict[str, Any] | None = None,
     eps: float = 1e-6,
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
     """Make sample transform for flat map data.
@@ -146,7 +147,8 @@ def make_flat_transform(
     of this.
     """
     if masking:
-        mask_fn = make_masking(masking)
+        masking_kwargs = masking_kwargs or {}
+        mask_fn = make_masking(masking, **masking_kwargs)
     else:
         mask_fn = None
 
