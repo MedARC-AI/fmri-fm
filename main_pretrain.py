@@ -32,6 +32,7 @@ from torch.utils.data import DataLoader
 from engine_pretrain import train_one_epoch, evaluate
 from flat_data import make_flat_dataset, make_flat_transform
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
+from _version import __version__
 
 PROJECT = "fMRI-foundation-model"
 
@@ -43,10 +44,11 @@ def main(args: DictConfig):
 
     global_rank = misc.get_rank()
     if global_rank == 0 and args.wandb:
-        wandb.init(project=PROJECT, name=args.name, config=vars(args))
+        wandb.init(project=PROJECT, name=args.name, config=OmegaConf.to_container(args))
 
+    print(f"pretraining fmri-fm ({__version__})")
     print("job dir: {}".format(os.path.dirname(os.path.realpath(__file__))))
-    print("config:\n", OmegaConf.to_yaml(args))
+    print("config:", OmegaConf.to_yaml(args), sep="\n")
 
     device = torch.device(args.device)
 
@@ -90,7 +92,7 @@ def main(args: DictConfig):
         total_num_batches[dataset_name] = (
             dataset_config.samples_per_epoch // args.batch_size
         )
-    
+
     data_loader_train = data_loaders["train"]
     data_loaders_eval = data_loaders.copy()
     data_loaders_eval.pop("train")
@@ -100,7 +102,15 @@ def main(args: DictConfig):
     if global_rank == 0 and args.output_dir:
         if args.name:
             args.output_dir = f"{args.output_dir}/{args.name}"
-        Path(args.output_dir).mkdir(parents=True)
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        out_cfg_path = output_dir / "config.yaml"
+        if out_cfg_path.exists():
+            prev_cfg = OmegaConf.load(out_cfg_path)
+            assert args == prev_cfg, "current config doesn't match previous config"
+        else:
+            OmegaConf.save(args, out_cfg_path)
 
     # define the model
     model = models_mae.__dict__[args.model](**args)
@@ -172,8 +182,9 @@ def main(args: DictConfig):
         )
 
         eval_stats = {}
+        eval_plots = {}
         for dataset_name, data_loader_eval in data_loaders_eval.items():
-            eval_stats[dataset_name] = evaluate(
+            ds_stats, ds_plots = evaluate(
                 model,
                 data_loader_eval,
                 dataset_name,
@@ -184,9 +195,11 @@ def main(args: DictConfig):
                 num_batches=total_num_batches[dataset_name],
                 log_wandb=args.wandb,
             )
+            eval_stats[dataset_name] = ds_stats
+            eval_plots[dataset_name] = ds_plots
 
         if args.output_dir and (
-            epoch % args.checkpoint_period == 0 or epoch + 1 == args.epochs
+            epoch % args.checkpoint_period == 0 or epoch + 1 == args.epochs or args.debug
         ):
             checkpoint_path = misc.save_model(
                 args=args,
@@ -213,6 +226,15 @@ def main(args: DictConfig):
             ) as f:
                 f.write(json.dumps(log_stats) + "\n")
 
+        log_plots = {
+            f"{ds_name}_{k}": img for ds_name, ds_plots in eval_plots.items()
+            for k, img in ds_plots.items()
+        }
+
+        if log_plots and args.output_dir and misc.is_main_process():
+            for plot_name, img in log_plots.items():
+                img.save(f"{args.output_dir}/{plot_name}__{epoch:05}.png")
+
         if args.debug:
             break
 
@@ -227,14 +249,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--cfg-path", type=str, default=None)
     parser.add_argument("--overrides", type=str, default=None, nargs="+")
-    # args = parser.parse_args()
-    args = parser.parse_args(
-        [
-            "--overrides",
-            "debug=true",
-            "wandb=false",
-        ]
-    )
+    args = parser.parse_args()
     cfg = OmegaConf.load(DEFAULT_CONFIG)
     if args.cfg_path:
         cfg = OmegaConf.unsafe_merge(cfg, OmegaConf.load(args.cfg_path))

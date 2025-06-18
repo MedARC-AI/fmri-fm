@@ -11,6 +11,7 @@
 import math
 from typing import Iterable
 
+import numpy as np
 import util.lr_sched as lr_sched
 import util.misc as misc
 import util.visualization as vis
@@ -67,14 +68,14 @@ def train_one_epoch(
 
         samples = batch["image"]
         img_mask = batch["mask"]
-        visible_mask = batch["visible_mask"]
+        visible_mask = batch.get("visible_mask")
 
         samples = samples.to(device, non_blocking=True)
         img_mask = img_mask.to(device, non_blocking=True)
         if visible_mask is not None:
             visible_mask = visible_mask.to(device, non_blocking=True)
 
-        with torch.autocast(enabled=not fp32):
+        with torch.autocast(device_type=device.type, enabled=not fp32):
             loss, _, _ = model(
                 samples,
                 mask_ratio=args.mask_ratio,
@@ -112,6 +113,7 @@ def train_one_epoch(
         metric_logger.update(cpu_mem=misc.cpu_mem_usage()[0])
         metric_logger.update(cpu_mem_all=misc.cpu_mem_usage()[1])
         metric_logger.update(gpu_mem=misc.gpu_mem_usage())
+        # TODO: log mask stats?
 
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)
@@ -159,6 +161,8 @@ def evaluate(
     if num_batches is None:
         num_batches = len(data_loader)
 
+    example_iter = np.random.randint(0, debug_steps if args.debug else num_batches)
+
     for data_iter_step, batch in enumerate(
         metric_logger.log_every(
             data_loader, print_freq, header, total_steps=num_batches
@@ -166,14 +170,14 @@ def evaluate(
     ):
         samples = batch["image"]
         img_mask = batch["mask"]
-        visible_mask = batch["visible_mask"]
+        visible_mask = batch.get("visible_mask")
 
         samples = samples.to(device, non_blocking=True)
         img_mask = img_mask.to(device, non_blocking=True)
         if visible_mask is not None:
             visible_mask = visible_mask.to(device, non_blocking=True)
 
-        with torch.autocast(enabled=not fp32):
+        with torch.autocast(device_type=device.type, enabled=not fp32):
             loss, pred, mask = model(
                 samples,
                 mask_ratio=args.mask_ratio,
@@ -184,23 +188,45 @@ def evaluate(
         loss_value = loss.item()
         metric_logger.update(loss=loss_value)
 
+        if data_iter_step == example_iter:
+            example_data = {
+                "samples": samples,
+                "pred": pred,
+                "mask": mask,
+                "img_mask": img_mask,
+                "visible_mask": visible_mask,
+            }
+
         if args.debug and (data_iter_step + 1) >= debug_steps:
             break
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print(f"Averaged stats ({eval_name}):", metric_logger)
+    stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+    # make plots
+    print(f"Making plots ({eval_name}, example={example_iter})")
+    samples = example_data["samples"]
+    pred = example_data["pred"]
+    mask = example_data["mask"]
+    img_mask = example_data["img_mask"]
+    visible_mask = example_data["visible_mask"]
+
+    target, _, _, im_masked, im_paste, img_mask = model_without_ddp.forward_masked_recon(
+        samples, pred, mask, img_mask=img_mask, visible_mask=visible_mask,
+    )
+    mask_pred_fig = vis.plot_mask_pred(target, im_masked, im_paste, img_mask=img_mask)
+    mask_pred_img = vis.fig2pil(mask_pred_fig)
+    plots = {"mask_pred": mask_pred_img}
 
     if log_wandb:
-        loss_value_reduce = metric_logger.meters["loss"].global_avg
+        # eval at the end of training, so epoch + 1
         epoch_1000x = int((epoch + 1) * 1000)
-        wandb.log({f"{eval_name}_loss": loss_value_reduce}, step=epoch_1000x)
-
-        target, _, _, im_masked, im_paste = model_without_ddp.forward_masked_recon(
-            samples, pred, mask
+        wandb.log({f"{eval_name}_{k}": v for k, v in stats.items()}, step=epoch_1000x)
+        wandb.log(
+            {f"{eval_name}_{k}": wandb.Image(img) for k, img in plots.items()},
+            step=epoch_1000x,
         )
-        fig = vis.plot_mask_pred(target, im_masked, im_paste, img_mask=img_mask)
-        img = vis.fig2pil(fig)
-        wandb.log({f"{eval_name}_mask_pred": wandb.Image(img)}, step=epoch_1000x)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return stats, plots

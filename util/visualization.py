@@ -45,9 +45,8 @@ def plot_mask_pred(
     im_paste = im_paste.flatten(0, 1)[:nrow].cpu().numpy()
 
     if img_mask is not None:
-        img_mask = img_mask.cpu().numpy()
-    else:
-        img_mask = None
+        assert img_mask.shape == (N, T, H, W)
+        img_mask = img_mask.flatten(0, 1)[:nrow].cpu().numpy()
 
     ploth = 2.0
     plotw = (W / H) * ploth
@@ -61,10 +60,10 @@ def plot_mask_pred(
         n_idx, t_idx = ii // T, ii % T
 
         plt.sca(axs[ii, 0])
-        _imshow(im_masked[ii], mask=img_mask, vmin=-vmax, vmax=vmax)
+        _imshow(im_masked[ii], mask=img_mask[ii], vmin=-vmax, vmax=vmax)
         plt.text(
-            0.05,
-            0.95,
+            0.01,
+            0.98,
             f"({n_idx}, {t_idx})",
             transform=axs[ii, 0].transAxes,
             va="top",
@@ -72,10 +71,10 @@ def plot_mask_pred(
         )
 
         plt.sca(axs[ii, 1])
-        _imshow(im_paste[ii], mask=img_mask, vmin=-vmax, vmax=vmax)
+        _imshow(im_paste[ii], mask=img_mask[ii], vmin=-vmax, vmax=vmax)
 
         plt.sca(axs[ii, 2])
-        _imshow(target[ii], mask=img_mask, vmin=-vmax, vmax=vmax)
+        _imshow(target[ii], mask=img_mask[ii], vmin=-vmax, vmax=vmax)
 
     plt.tight_layout(pad=0.25)
     return fig

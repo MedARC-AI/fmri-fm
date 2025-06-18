@@ -25,7 +25,7 @@ def make_flat_dataset(
     dataset = wds.WebDataset(
         url,
         resampled=shuffle,
-        shardshuffle=100 if shuffle else False,
+        shardshuffle=False,
         nodesplitter=wds.split_by_node,
     )
     dataset = dataset.decode().map(extract_flat_sample)
@@ -72,11 +72,13 @@ def random_clips(num_frames: int = 16, oversample: float = 1.0):
         for sample in dataset:
             image = sample["image"]
             n_clips = int(oversample * len(image) / num_frames)
-            for _ in range(n_clips):
-                start = np.random.randint(0, len(image) - num_frames)
+            indices = np.sort(
+                np.random.randint(0, len(image) - num_frames + 1, size=n_clips)
+            )
+            for start in indices:
                 # copy to avoid a memory leak when used with a shuffle buffer.
                 clip = image[start : start + num_frames].copy()
-                yield {**sample, "bold": clip, "start": start}
+                yield {**sample, "image": clip, "start": start}
 
     return _filter
 
@@ -91,7 +93,7 @@ def sequential_clips(num_frames: int = 16, stride: int | None = None):
     def _filter(dataset: Iterable[dict[str, Any]]):
         for sample in dataset:
             image = sample["image"]
-            for start in range(0, len(image) - num_frames, stride):
+            for start in range(0, len(image) - num_frames + 1, stride):
                 clip = image[start : start + num_frames].copy()
                 yield {**sample, "image": clip, "start": start}
 
@@ -161,8 +163,8 @@ def make_flat_transform(
 
         # global z-score values of sample.
         if normalize:
-            mean = image[..., mask].mean()
-            stdev = image[..., mask].std()
+            mean = image[..., mask > 0].mean()
+            stdev = image[..., mask > 0].std()
             image = (image - mean) / (stdev + eps)
             image = image * mask
 
@@ -172,6 +174,7 @@ def make_flat_transform(
 
         if mask_fn is not None:
             visible_mask = mask_fn(mask)
+            visible_mask = visible_mask * mask
         else:
             visible_mask = None
 
@@ -186,8 +189,17 @@ def make_flat_transform(
             visible_mask = pad_to_multiple(visible_mask, patch_size)
 
         # (C, T, H, W)
-        image = image.unsqueeze(0)
-        return {**sample, "image": image, "mask": mask, "visible_mask": visible_mask}
+        image = image[None]
+        mask = mask[None, None]
+        if visible_mask is not None:
+            visible_mask = visible_mask[None, None]
+
+        # drop other keys bc they may be hard to collate.
+        # later we may want to keep some of the other data, or include targets.
+        sample = {"image": image, "mask": mask}
+        if visible_mask is not None:
+            sample["visible_mask"] = visible_mask
+        return sample
 
     return transform
 
@@ -198,7 +210,7 @@ def hemi_masking(mask: torch.Tensor) -> torch.Tensor:
     Assumes the hemispheres are in the left and right image halves.
     """
     H, W = mask.shape
-    visible_mask = mask.clone()
+    visible_mask = torch.ones_like(mask)
     if np.random.rand() < 0.5:
         # lh visible
         visible_mask[:, W // 2:] = 0
@@ -216,7 +228,6 @@ def inverse_block_masking(mask: torch.Tensor, block_size: int = 160) -> torch.Te
 
     visible_mask = torch.zeros_like(mask)
     visible_mask[h_idx: h_idx + block_size, w_idx: w_idx + block_size] = 1
-    visible_mask = mask * visible_mask
     return visible_mask
 
 
@@ -232,11 +243,10 @@ def hemi_inverse_block_masking(
         # rh block
         w_start, w_stop = W // 2, W
     h_idx = np.random.randint(0, H - block_size)
-    w_idx = np.random.randint(w_start, w_stop)
+    w_idx = np.random.randint(w_start, w_stop - block_size)
 
     visible_mask = torch.zeros_like(mask)
     visible_mask[h_idx: h_idx + block_size, w_idx: w_idx + block_size] = 1
-    visible_mask = mask * visible_mask
     return visible_mask
 
 

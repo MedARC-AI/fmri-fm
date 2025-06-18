@@ -367,7 +367,7 @@ def load_model(args, model_without_ddp, optimizer, loss_scaler):
             )
         else:
             with pathmgr.open(args.resume, "rb") as f:
-                checkpoint = torch.load(f, map_location="cpu")
+                checkpoint = torch.load(f, map_location="cpu", weights_only=False)
         model_without_ddp.load_state_dict(checkpoint["model"])
         print("Resume checkpoint %s" % args.resume)
         if (
