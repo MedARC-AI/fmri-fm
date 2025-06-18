@@ -127,5 +127,6 @@ num_workers: 4
 
 checkpoint_period: 1
 wandb: true
+wandb_entity: null
 debug: false
 device: cuda

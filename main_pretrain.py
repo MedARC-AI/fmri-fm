@@ -44,7 +44,12 @@ def main(args: DictConfig):
 
     global_rank = misc.get_rank()
     if global_rank == 0 and args.wandb:
-        wandb.init(project=PROJECT, name=args.name, config=OmegaConf.to_container(args))
+        wandb.init(
+            entity=args.wandb_entity,
+            project=PROJECT,
+            name=args.name,
+            config=OmegaConf.to_container(args),
+        )
 
     print(f"pretraining fmri-fm ({__version__})")
     print("job dir: {}".format(os.path.dirname(os.path.realpath(__file__))))
