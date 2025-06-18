@@ -23,6 +23,7 @@ import torch
 import torch.distributed
 import torch.distributed as dist
 from iopath.common.file_io import g_pathmgr as pathmgr
+from omegaconf import OmegaConf
 from util.logging import master_print as print
 from torch import inf
 
@@ -332,7 +333,7 @@ def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler):
         "optimizer": optimizer.state_dict(),
         "epoch": epoch,
         "scaler": loss_scaler.state_dict(),
-        "args": args,
+        "args": OmegaConf.to_container(args),
     }
 
     save_on_master(to_save, checkpoint_path)
@@ -367,7 +368,7 @@ def load_model(args, model_without_ddp, optimizer, loss_scaler):
             )
         else:
             with pathmgr.open(args.resume, "rb") as f:
-                checkpoint = torch.load(f, map_location="cpu", weights_only=False)
+                checkpoint = torch.load(f, map_location="cpu", weights_only=True)
         model_without_ddp.load_state_dict(checkpoint["model"])
         print("Resume checkpoint %s" % args.resume)
         if (

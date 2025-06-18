@@ -149,7 +149,7 @@ def main(args: DictConfig):
     if args.beta is None:
         beta = (0.9, 0.95)
     else:
-        beta = args.beta
+        beta = tuple(args.beta)
     optimizer = torch.optim.AdamW(
         param_groups,
         lr=args.lr,
