@@ -32,7 +32,6 @@ from webdataset import WebLoader as DataLoader
 from engine_pretrain import train_one_epoch, evaluate
 from flat_data import make_flat_dataset, make_flat_transform
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
-from _version import __version__
 
 PROJECT = "fMRI-foundation-model"
 
@@ -51,8 +50,9 @@ def main(args: DictConfig):
             config=OmegaConf.to_container(args),
         )
 
-    print(f"pretraining fmri-fm ({__version__})")
+    print("pretraining fmri-fm")
     print("job dir: {}".format(os.path.dirname(os.path.realpath(__file__))))
+    print(misc.get_sha())
     print("config:", OmegaConf.to_yaml(args), sep="\n")
 
     device = torch.device(args.device)
