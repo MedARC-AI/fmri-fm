@@ -126,7 +126,7 @@ def train_one_epoch(
             epoch_1000x = int(
                 (data_iter_step / num_batches + epoch) * 1000
             )
-            wandb.log({"train_loss": loss_value_reduce, "lr": lr}, step=epoch_1000x)
+            wandb.log({"train/loss": loss_value_reduce, "train/lr": lr}, step=epoch_1000x)
 
         if args.debug and (data_iter_step + 1) >= debug_steps:
             break
@@ -223,9 +223,9 @@ def evaluate(
     if log_wandb:
         # eval at the end of training, so epoch + 1
         epoch_1000x = int((epoch + 1) * 1000)
-        wandb.log({f"{eval_name}_{k}": v for k, v in stats.items()}, step=epoch_1000x)
+        wandb.log({f"test/{eval_name}/{k}": v for k, v in stats.items()}, step=epoch_1000x)
         wandb.log(
-            {f"{eval_name}_{k}": wandb.Image(img) for k, img in plots.items()},
+            {f"test/{eval_name}/{k}": wandb.Image(img) for k, img in plots.items()},
             step=epoch_1000x,
         )
 

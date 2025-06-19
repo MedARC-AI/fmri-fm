@@ -15,7 +15,6 @@ def make_flat_dataset(
     clipping: str = "random",
     clipping_kwargs: dict[str, Any] | None = None,
     shuffle: bool = True,
-    samples_per_epoch: int | None = None,
 ) -> wds.WebDataset:
     """Make fMRI flat map dataset."""
     # resampling creates an infinite stream of shards sampled with replacement,
@@ -37,9 +36,6 @@ def make_flat_dataset(
 
     if shuffle:
         dataset = dataset.shuffle(1000)
-
-    if samples_per_epoch:
-        dataset = dataset.with_epoch(samples_per_epoch)
     return dataset
 
 

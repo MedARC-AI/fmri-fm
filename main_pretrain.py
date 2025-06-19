@@ -28,7 +28,7 @@ import models_mae
 import wandb
 from iopath.common.file_io import g_pathmgr as pathmgr
 from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader
+from webdataset import WebLoader as DataLoader
 from engine_pretrain import train_one_epoch, evaluate
 from flat_data import make_flat_dataset, make_flat_transform
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
@@ -77,9 +77,8 @@ def main(args: DictConfig):
     for dataset_name, dataset_config in args.datasets.items():
         print(f"dataset: {dataset_name}\n\n{OmegaConf.to_yaml(dataset_config)}")
 
-        dataset_config.samples_per_epoch = (
-            dataset_config.samples_per_epoch // misc.get_world_size()
-        )
+        dataset_config = dataset_config.copy() 
+        samples_per_epoch = dataset_config.pop("samples_per_epoch")
 
         dataset = make_flat_dataset(num_frames=args.num_frames, **dataset_config)
         dataset = dataset.map(sample_transform)
@@ -92,11 +91,14 @@ def main(args: DictConfig):
             pin_memory=True,
             drop_last=True,
         )
-        data_loaders[dataset_name] = loader
 
-        total_num_batches[dataset_name] = (
-            dataset_config.samples_per_epoch // args.batch_size
-        )
+        # nb, setting the epoch length on the dataloader means we don't have to account
+        # for the parallel data loading workers.
+        num_batches = samples_per_epoch // (misc.get_world_size() * args.batch_size)
+        loader = loader.with_epoch(num_batches)
+
+        data_loaders[dataset_name] = loader
+        total_num_batches[dataset_name] = num_batches
 
     data_loader_train = data_loaders["train"]
     data_loaders_eval = data_loaders.copy()
@@ -218,7 +220,7 @@ def main(args: DictConfig):
         log_stats = {
             **{f"train_{k}": v for k, v in train_stats.items()},
             **{
-                f"{ds_name}_{k}": v for ds_name, ds_stats in eval_stats.items()
+                f"test_{ds_name}_{k}": v for ds_name, ds_stats in eval_stats.items()
                 for k, v in ds_stats.items()
             },
             "epoch": epoch,
@@ -232,7 +234,7 @@ def main(args: DictConfig):
                 f.write(json.dumps(log_stats) + "\n")
 
         log_plots = {
-            f"{ds_name}_{k}": img for ds_name, ds_plots in eval_plots.items()
+            f"test_{ds_name}_{k}": img for ds_name, ds_plots in eval_plots.items()
             for k, img in ds_plots.items()
         }
 
