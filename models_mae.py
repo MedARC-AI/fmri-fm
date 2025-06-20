@@ -232,12 +232,11 @@ class MaskedAutoencoderViT(nn.Module):
         imgs = x.reshape(shape=(N, C, T, H, W))
         return imgs
 
-    def random_masking(self, x, mask_ratio, img_patch_mask, visible_patch_mask):
+    def random_masking(self, x, mask_ratio, visible_patch_mask):
         """
         Perform per-sample random masking by per-sample shuffling.
         Per-sample shuffling is done by argsort random noise.
         x: [N, L, D], sequence
-        img_patch_mask: [N, L] mask of valid patches, 1=valid, 0=not valid 
         visible_patch_mask: [N, L] mask of visible patches, 1=visible, 0=not visible
         """
         N, L, D = x.shape  # batch, length, dim
@@ -247,14 +246,10 @@ class MaskedAutoencoderViT(nn.Module):
 
         # shift missing patches to not be selected
         # if there are not enough visible patches, invisible patches will still
-        # get selected. so we have filled them with zeros beforehand.
+        # get selected. we have filled them with zeros. but should still be sure to
+        # generate visible masks with enough patches to avoid this.
         if visible_patch_mask is not None:
             noise = noise + (1.0 - visible_patch_mask)
-        # shift invalid patches again, to make sure to avoid even as placeholders.
-        # a bit superstitious tbh. only reason is the pos embeddings might be untrained
-        # outside the img mask.
-        if img_patch_mask is not None:
-            noise = noise + (1.0 - img_patch_mask)
 
         # sort noise for each sample
         ids_shuffle = torch.argsort(
@@ -274,30 +269,21 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x_masked, mask, ids_restore, ids_keep
 
-    def forward_encoder(self, x, mask_ratio, img_mask, visible_mask):
+    def forward_encoder(self, x, mask_ratio, visible_mask):
         """
         x: [N, T, C, H, W]
-        img_mask: [*, H, W] mask of valid pixels, 1=valid, 0=not valid
         visible_mask: [*, H, W] mask of visible pixels, 1=visible, 0=not visible
         """
-        if img_mask is not None:
-            img_mask = img_mask.expand_as(x)
-            # [N, L] mask of patches containing some valid pixels
-            img_patch_mask = self.patchify(img_mask, predict=False)
-            img_patch_mask = img_patch_mask.sum(dim=-1).clip(max=1)
-        else:
-            img_patch_mask = None
-
         if visible_mask is not None:
-            visible_mask = visible_mask.expand_as(x)
             # mask invisible part of x with zeros.
             x = visible_mask * x
             # [N, L] mask of patches containing some visible pixels
+            visible_mask = visible_mask.expand_as(x)
             visible_patch_mask = self.patchify(visible_mask, predict=False)
             visible_patch_mask = visible_patch_mask.sum(dim=-1).clip(max=1)
         else:
             visible_patch_mask = None
-        
+
         # embed patches
         x = self.patch_embed(x)
         N, T, L, C = x.shape
@@ -306,7 +292,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         # masking: length -> length * mask_ratio
         x, mask, ids_restore, ids_keep = self.random_masking(
-            x, mask_ratio, img_patch_mask, visible_patch_mask
+            x, mask_ratio, visible_patch_mask
         )
         x = x.view(N, -1, C)
         # append cls token
@@ -480,14 +466,14 @@ class MaskedAutoencoderViT(nn.Module):
         elif img_mask is not None:
             visible_mask = img_mask * visible_mask
         latent, mask, ids_restore = self.forward_encoder(
-            imgs, mask_ratio, img_mask, visible_mask
+            imgs, mask_ratio, visible_mask
         )
         pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*C]
         loss = self.forward_loss(imgs, pred, mask, img_mask)
         return loss, pred, mask
 
     @torch.no_grad()
-    def forward_masked_recon(self, imgs, pred, mask, img_mask=None, visible_mask=None):
+    def forward_masked_recon(self, imgs, pred, mask, img_mask=None):
         # imgs: [N, C, T, H, W]
         # pred: [N, t*h*w, u*p*p*C]
         # mask: [N, t*h*w], 0 is keep, 1 is remove,
@@ -509,13 +495,6 @@ class MaskedAutoencoderViT(nn.Module):
         mask = mask.unsqueeze(-1).repeat(1, 1, ph * pw * C)  # (N, T*H*W, p*p*c)
         mask = self.unpatchify(mask)  # 1 is removing, 0 is keeping
 
-        if visible_mask is not None:
-            # mark invisible patches as unobserved, even if they may be included in the
-            # observed mask, bc they have been filled with zeros.
-            visible_mask = visible_mask.expand_as(imgs)
-            visible_mask = torch.index_select(visible_mask, 2, t_indices)
-            mask = 1 - (1 - mask) * visible_mask
-
         mask = torch.einsum("ncthw->nthwc", mask)
 
         # masked image
@@ -524,6 +503,7 @@ class MaskedAutoencoderViT(nn.Module):
         # MAE reconstruction pasted with visible patches
         im_paste = target * (1 - mask) + pred * mask
 
+        # process the img_mask to match the target.
         if img_mask is not None:
             img_mask = img_mask.expand_as(imgs)
             img_mask = torch.index_select(img_mask, 2, t_indices)
@@ -572,9 +552,9 @@ def mae_vit_large_patch16(**kwargs):
     return model
 
 
-def mae_vit_huge_patch14(**kwargs):
+def mae_vit_huge_patch16(**kwargs):
     model = MaskedAutoencoderViT(
-        patch_size=14,
+        patch_size=16,
         embed_dim=1280,
         depth=32,
         num_heads=16,
