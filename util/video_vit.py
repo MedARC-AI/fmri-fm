@@ -5,6 +5,7 @@
 import util.logging as logging
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from timm.layers import to_2tuple
 from timm.models.vision_transformer import DropPath, Mlp
 
@@ -113,11 +114,9 @@ class Attention(nn.Module):
             .permute(0, 2, 1, 3)
         )
 
-        attn = (q @ k.transpose(-2, -1)) * self.scale
+        x = F.scaled_dot_product_attention(q, k, v)
+        x = x.transpose(1, 2).reshape(B, N, C)
 
-        attn = attn.softmax(dim=-1)
-
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
         x = x.view(B, -1, C)

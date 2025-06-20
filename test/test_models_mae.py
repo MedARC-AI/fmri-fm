@@ -1,4 +1,4 @@
-from typing import Literal
+import math
 
 import pytest
 import torch
@@ -58,6 +58,7 @@ def test_mae_vit(
     with_img_mask: bool,
     with_vis_mask: bool,
 ):
+    # check that model runs for all cases.
     img_size = to_2tuple(img_size)
     H, W = img_size
 
@@ -88,3 +89,17 @@ def test_mae_vit(
         f"mask: {mask.shape}, {mask.sum().item()}."
     )
     assert not torch.isnan(loss)
+
+
+def test_mae_vit_expected_loss():
+    # check that model computation doesn't change in case we change implementation.
+    torch.manual_seed(42)
+    H = W = 224
+    num_frames = 16
+    in_chans = 3
+    model = mae_vit_tiny_patch16()
+    x = torch.randn(2, in_chans, num_frames, H, W)
+    loss, pred, mask = model.forward(x)
+    loss_value = loss.item()
+    expected_value = 1.3999768495559692
+    assert math.isclose(loss_value, expected_value, rel_tol=1e-6)
