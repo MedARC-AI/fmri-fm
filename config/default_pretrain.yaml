@@ -1,4 +1,8 @@
+# Name of the run. For output directory and wandb.
 name: pretrain_hcp
+
+# Description of the run. Goes in wandb notes.
+notes: null
 
 output_dir: checkpoints
 seed: 7338

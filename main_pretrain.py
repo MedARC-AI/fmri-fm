@@ -47,6 +47,7 @@ def main(args: DictConfig):
             entity=args.wandb_entity,
             project=PROJECT,
             name=args.name,
+            notes=args.notes,
             config=OmegaConf.to_container(args),
         )
 
