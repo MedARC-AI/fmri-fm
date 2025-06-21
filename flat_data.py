@@ -19,7 +19,6 @@ def make_flat_dataset(
     """Make fMRI flat map dataset."""
     # resampling creates an infinite stream of shards sampled with replacement,
     # guaranteeing that no process runs out of data early in distributed training.
-    # should set samples_per_epoch in this case.
     # see webdataset FAQ: https://github.com/webdataset/webdataset/blob/main/FAQ.md
     dataset = wds.WebDataset(
         url,
@@ -252,6 +251,8 @@ def hemi_inverse_block_masking(
 #   - Surface neighborhood masking. Get XYZ coordinates of flat mask, eg for inflated
 #     surface. Get euclidean neighborhood around random point for visible area.
 #     Generalization of inverse block masking with roll to closed cortical surface.
+#   - Block constrained to fit mostly in mask. Sample a corner contained in the mask,
+#     then decide which of the four box corners it is to maximize overlap.
 
 MASKING_REGISTRY = {
     "hemi": hemi_masking,
