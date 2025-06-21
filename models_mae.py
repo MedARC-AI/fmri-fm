@@ -46,12 +46,18 @@ class MaskedAutoencoderViT(nn.Module):
         sep_pos_embed=False,
         trunc_init=False,
         cls_embed=False,
+        reg_tokens=0,
+        no_cls_pos=False,
+        init_decoder_scale=None,
         **kwargs,
     ):
         super().__init__()
         self.trunc_init = trunc_init
         self.sep_pos_embed = sep_pos_embed
         self.cls_embed = cls_embed
+        self.reg_tokens = reg_tokens
+        self.no_cls_pos = no_cls_pos
+        self.init_decoder_scale = init_decoder_scale
         self.t_pred_patch_size = t_pred_patch_size
         assert t_patch_size % t_pred_patch_size == 0
 
@@ -70,6 +76,9 @@ class MaskedAutoencoderViT(nn.Module):
         if self.cls_embed:
             self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
             self.decoder_cls_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
+
+        if self.reg_tokens:
+            self.reg_token = nn.Parameter(torch.zeros(1, reg_tokens, embed_dim))
 
         if sep_pos_embed:
             self.pos_embed_spatial = nn.Parameter(
@@ -119,7 +128,7 @@ class MaskedAutoencoderViT(nn.Module):
             if self.cls_embed:
                 self.decoder_pos_embed_class = nn.Parameter(
                     torch.zeros(1, 1, decoder_embed_dim)
-                )
+            )
         else:
             if self.cls_embed:
                 _num_patches = num_patches + 1
@@ -151,6 +160,9 @@ class MaskedAutoencoderViT(nn.Module):
             bias=True,
         )
 
+        if init_decoder_scale:
+            self.decoder_scale = nn.Parameter(torch.ones(()) * init_decoder_scale)
+
         self.norm_pix_loss = norm_pix_loss
 
         self.initialize_weights()
@@ -160,6 +172,8 @@ class MaskedAutoencoderViT(nn.Module):
     def initialize_weights(self):
         if self.cls_embed:
             torch.nn.init.trunc_normal_(self.cls_token, std=0.02)
+        if self.reg_tokens:
+            torch.nn.init.trunc_normal_(self.reg_token, std=0.02)
         if self.sep_pos_embed:
             torch.nn.init.trunc_normal_(self.pos_embed_spatial, std=0.02)
             torch.nn.init.trunc_normal_(self.pos_embed_temporal, std=0.02)
@@ -240,45 +254,103 @@ class MaskedAutoencoderViT(nn.Module):
         visible_patch_mask: [N, L] mask of visible patches, 1=visible, 0=not visible
         """
         N, L, D = x.shape  # batch, length, dim
-        len_keep = int(L * (1 - mask_ratio))
+
+        # mask ratio is relative to the (minimum) size of the visible mask
+        if visible_patch_mask is not None:
+            total_patches = visible_patch_mask.sum(dim=1).min().item()
+        else:
+            total_patches = L
+        len_keep = int(total_patches * (1 - mask_ratio))
 
         noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
 
-        # shift missing patches to not be selected
-        # if there are not enough visible patches, invisible patches will still
-        # get selected. we have filled them with zeros. but should still be sure to
-        # generate visible masks with enough patches to avoid this.
+        # shift invisible patches to not be selected
         if visible_patch_mask is not None:
             noise = noise + (1.0 - visible_patch_mask)
 
         # sort noise for each sample
-        ids_shuffle = torch.argsort(
-            noise, dim=1
-        )  # ascend: small is keep, large is remove
-        ids_restore = torch.argsort(ids_shuffle, dim=1)
+        # ascend: small is keep, large is remove
+        ids_shuffle = torch.argsort(noise, dim=1)
 
         # keep the first subset
         ids_keep = ids_shuffle[:, :len_keep]
-        x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
+        x_masked = torch.gather(
+            x, dim=1, index=ids_keep.unsqueeze(-1).expand(-1, -1, D)
+        )
 
         # generate the binary mask: 0 is keep, 1 is remove
-        mask = torch.ones([N, L], device=x.device)
-        mask[:, :len_keep] = 0
-        # unshuffle to get the binary mask
-        mask = torch.gather(mask, dim=1, index=ids_restore)
+        mask = torch.ones([N, L], dtype=x.dtype, device=x.device)
+        mask = mask.scatter(
+            dim=1,
+            index=ids_keep,
+            src=torch.zeros([N, len_keep], dtype=x.dtype, device=x.device),
+        )
+        return x_masked, mask, ids_keep
 
-        return x_masked, mask, ids_restore, ids_keep
+    def apply_pos_embed(self, x, ids_keep=None, decoder=False):
+        """
+        Apply position embedding and prepend extra tokens.
+
+        x: [N, L, C]
+        ids_keep: [N, L] position indices of x
+
+        Reference: timm vit
+        """
+        N, L, C = x.shape
+
+        if self.sep_pos_embed:
+            if decoder:
+                pos_embed_temporal = self.decoder_pos_embed_temporal
+                pos_embed_spatial = self.decoder_pos_embed_spatial
+            else:
+                pos_embed_temporal = self.pos_embed_temporal
+                pos_embed_spatial = self.pos_embed_spatial
+
+            pos_embed = pos_embed_temporal[:, :, None] + pos_embed_spatial[:, None, :]
+            pos_embed = pos_embed.flatten(1, 2)
+
+            if decoder:
+                cls_pos_embed = self.decoder_pos_embed_class
+            else:
+                cls_pos_embed = self.pos_embed_class
+        else:
+            pos_embed = self.decoder_pos_embed if decoder else self.pos_embed
+            cls_pos_embed = pos_embed[:, :1, :]
+            pos_embed = pos_embed[:, 1:, :]
+
+        pos_embed = pos_embed.expand(N, -1, -1)
+
+        if ids_keep is not None:
+            pos_embed = torch.gather(
+                pos_embed, dim=1, index=ids_keep.unsqueeze(-1).expand(-1, -1, C)
+            )
+
+        x = x + pos_embed
+
+        to_cat = []
+        if self.cls_embed:
+            cls_token = self.decoder_cls_token if decoder else self.cls_token
+            if not self.no_cls_pos:
+                cls_token = cls_token + cls_pos_embed
+            to_cat.append(cls_token.expand(N, -1, -1))
+
+        if self.reg_tokens and not decoder:
+            to_cat.append(self.reg_token.expand(N, -1, -1))
+
+        if to_cat:
+            x = torch.cat(to_cat + [x], dim=1)
+
+        return x
 
     def forward_encoder(self, x, mask_ratio, visible_mask):
         """
-        x: [N, T, C, H, W]
-        visible_mask: [*, H, W] mask of visible pixels, 1=visible, 0=not visible
+        x: [N, C, T, H, W]
+        visible_mask: [N, C, T, H, W] mask of visible pixels, 1=visible, 0=not visible
         """
         if visible_mask is not None:
             # mask invisible part of x with zeros.
             x = visible_mask * x
             # [N, L] mask of patches containing some visible pixels
-            visible_mask = visible_mask.expand_as(x)
             visible_patch_mask = self.patchify(visible_mask, predict=False)
             visible_patch_mask = visible_patch_mask.sum(dim=-1).clip(max=1)
         else:
@@ -291,123 +363,65 @@ class MaskedAutoencoderViT(nn.Module):
         x = x.reshape(N, T * L, C)
 
         # masking: length -> length * mask_ratio
-        x, mask, ids_restore, ids_keep = self.random_masking(
-            x, mask_ratio, visible_patch_mask
-        )
-        x = x.view(N, -1, C)
-        # append cls token
-        if self.cls_embed:
-            cls_token = self.cls_token
-            cls_tokens = cls_token.expand(x.shape[0], -1, -1)
-            x = torch.cat((cls_tokens, x), dim=1)
+        x, mask, ids_keep = self.random_masking(x, mask_ratio, visible_patch_mask)
 
-        # add pos embed w/o cls token
-        if self.sep_pos_embed:
-            pos_embed = self.pos_embed_spatial.repeat(
-                1, self.input_size[0], 1
-            ) + torch.repeat_interleave(
-                self.pos_embed_temporal,
-                self.input_size[1] * self.input_size[2],
-                dim=1,
-            )
-            pos_embed = pos_embed.expand(x.shape[0], -1, -1)
-            pos_embed = torch.gather(
-                pos_embed,
-                dim=1,
-                index=ids_keep.unsqueeze(-1).repeat(1, 1, pos_embed.shape[2]),
-            )
-            if self.cls_embed:
-                pos_embed = torch.cat(
-                    [
-                        self.pos_embed_class.expand(pos_embed.shape[0], -1, -1),
-                        pos_embed,
-                    ],
-                    1,
-                )
-        else:
-            if self.cls_embed:
-                cls_ind = 1
-            else:
-                cls_ind = 0
-            pos_embed = self.pos_embed[:, cls_ind:, :].expand(x.shape[0], -1, -1)
-            pos_embed = torch.gather(
-                pos_embed,
-                dim=1,
-                index=ids_keep.unsqueeze(-1).repeat(1, 1, pos_embed.shape[2]),
-            )
-            if self.cls_embed:
-                pos_embed = torch.cat(
-                    [
-                        self.pos_embed[:, :1, :].expand(x.shape[0], -1, -1),
-                        pos_embed,
-                    ],
-                    1,
-                )
-        x = x.view([N, -1, C]) + pos_embed
+        x = self.apply_pos_embed(x, ids_keep)
 
         # apply Transformer blocks
         for blk in self.blocks:
             x = blk(x)
         x = self.norm(x)
 
-        if self.cls_embed:
-            # remove cls token
-            x = x[:, 1:, :]
-        else:
-            x = x[:, :, :]
+        # remove prefix tokens
+        num_prefix_tokens = int(self.cls_embed) + self.reg_tokens
+        x = x[:, num_prefix_tokens:, :]
 
-        return x, mask, ids_restore
+        return x, mask, ids_keep
 
-    def forward_decoder(self, x, ids_restore):
-        # note, in the case that the img_mask is small, we are doing a forward pass on
-        # many extra patches where we won't evaluate the loss. this is a waste of
-        # compute. a better strategy would be to evaluate the decoder on only a fixed
-        # size subset of the valid image mask, as in cross MAE.
-        N = x.shape[0]
+    def forward_decoder(self, x, mask, ids_keep, decoder_mask_ratio, img_mask):
+        # embed tokens to match embed dims
+        x = self.decoder_embed(x)
+
+        N, L, C = x.shape
         T = self.patch_embed.t_grid_size
         H, W = self.patch_embed.grid_size
 
-        # embed tokens
-        x = self.decoder_embed(x)
-        C = x.shape[-1]
+        mask_tokens = self.mask_token.expand(N, T * H * W, -1).to(x.dtype)
 
-        # append mask tokens to sequence
-        mask_tokens = self.mask_token.repeat(N, T * H * W + 0 - x.shape[1], 1)
-        x_ = torch.cat([x[:, :, :], mask_tokens], dim=1)  # no cls token
-        x_ = x_.view([N, T * H * W, C])
-        x_ = torch.gather(
-            x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x_.shape[2])
-        )  # unshuffle
-        x = x_.view([N, T * H * W, C])
-        # append cls token
-        if self.cls_embed:
-            decoder_cls_token = self.decoder_cls_token
-            decoder_cls_tokens = decoder_cls_token.expand(x.shape[0], -1, -1)
-            x = torch.cat((decoder_cls_tokens, x), dim=1)
-
-        if self.sep_pos_embed:
-            decoder_pos_embed = self.decoder_pos_embed_spatial.repeat(
-                1, self.input_size[0], 1
-            ) + torch.repeat_interleave(
-                self.decoder_pos_embed_temporal,
-                self.input_size[1] * self.input_size[2],
-                dim=1,
+        if decoder_mask_ratio is None:
+            # full decoding
+            # scatter encoder embeddings into the sequence of mask tokens.
+            x = mask_tokens.scatter(
+                dim=1, index=ids_keep.unsqueeze(-1).expand(-1, -1, C), src=x
             )
-            if self.cls_embed:
-                decoder_pos_embed = torch.cat(
-                    [
-                        self.decoder_pos_embed_class.expand(
-                            decoder_pos_embed.shape[0], -1, -1
-                        ),
-                        decoder_pos_embed,
-                    ],
-                    1,
-                )
-        else:
-            decoder_pos_embed = self.decoder_pos_embed[:, :, :]
 
-        # add pos embed
-        x = x + decoder_pos_embed
+            decoder_ids_keep = None
+            decoder_mask = mask
+        else:
+            # partial decoding
+            # only decode unobserved patches (duh)
+            decoder_patch_mask = mask
+
+            # don't decode patches outside of img mask
+            if img_mask is not None:
+                img_patch_mask = self.patchify(img_mask, predict=False)
+                img_patch_mask = img_patch_mask.sum(dim=-1).clip(max=1)
+                decoder_patch_mask = img_patch_mask * decoder_patch_mask
+
+            # select which tokens to decode
+            mask_tokens, decoder_mask, decoder_ids_keep = self.random_masking(
+                mask_tokens, decoder_mask_ratio, decoder_patch_mask
+            )
+
+            # append selected mask tokens
+            x = torch.cat([x, mask_tokens], dim=1)
+            decoder_ids_keep = torch.cat([ids_keep, decoder_ids_keep], dim=1)
+
+            # invert decoder mask, so that 1 = decoded unobserved patches
+            decoder_mask = 1 - decoder_mask
+
+        # pos embed, subset of ids
+        x = self.apply_pos_embed(x, decoder_ids_keep, decoder=True)
 
         # apply Transformer blocks
         for blk in self.decoder_blocks:
@@ -417,11 +431,25 @@ class MaskedAutoencoderViT(nn.Module):
         # predictor projection
         x = self.decoder_pred(x)
 
+        if self.init_decoder_scale:
+            x = self.decoder_scale * x
+
         if self.cls_embed:
             # remove cls token
             x = x[:, 1:, :]
 
-        return x
+        # reconstruct full prediction for consistency
+        if decoder_mask_ratio is not None:
+            zeros = torch.zeros(
+                N, T * H * W, x.shape[-1], dtype=x.dtype, device=x.device
+            )
+            x = zeros.scatter(
+                dim=1,
+                index=decoder_ids_keep.unsqueeze(-1).expand(-1, -1, x.shape[-1]),
+                src=x,
+            )
+
+        return x, decoder_mask
 
     def forward_loss(self, imgs, pred, mask, img_mask):
         """
@@ -449,7 +477,6 @@ class MaskedAutoencoderViT(nn.Module):
 
         # exclude invalid pixels from loss
         if img_mask is not None:
-            img_mask = img_mask.expand_as(imgs)
             img_mask = torch.index_select(img_mask, 2, t_indices)
             img_mask_patches = self.patchify(img_mask)
             # [N, L, D] mask of valid pixels to compute loss over
@@ -460,17 +487,32 @@ class MaskedAutoencoderViT(nn.Module):
         loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
         return loss
 
-    def forward(self, imgs, mask_ratio=0.75, img_mask=None, visible_mask=None):
+    def forward(
+        self,
+        imgs,
+        mask_ratio=0.75,
+        decoder_mask_ratio=None,
+        img_mask=None,
+        visible_mask=None,
+    ):
         if visible_mask is None:
             visible_mask = img_mask
         elif img_mask is not None:
             visible_mask = img_mask * visible_mask
-        latent, mask, ids_restore = self.forward_encoder(
+
+        if img_mask is not None:
+            img_mask = img_mask.expand_as(imgs)
+        if visible_mask is not None:
+            visible_mask = visible_mask.expand_as(imgs)
+
+        latent, mask, ids_keep = self.forward_encoder(
             imgs, mask_ratio, visible_mask
         )
-        pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*C]
-        loss = self.forward_loss(imgs, pred, mask, img_mask)
-        return loss, pred, mask
+        pred, decoder_mask = self.forward_decoder(
+            latent, mask, ids_keep, decoder_mask_ratio, img_mask
+        )
+        loss = self.forward_loss(imgs, pred, decoder_mask, img_mask)
+        return loss, pred, mask, decoder_mask
 
     @torch.no_grad()
     def forward_masked_recon(self, imgs, pred, mask, img_mask=None):
@@ -492,7 +534,7 @@ class MaskedAutoencoderViT(nn.Module):
         pred = torch.einsum("ncthw->nthwc", pred)
 
         ph, pw = self.patch_embed.patch_size
-        mask = mask.unsqueeze(-1).repeat(1, 1, ph * pw * C)  # (N, T*H*W, p*p*c)
+        mask = mask.unsqueeze(-1).expand(-1, -1, ph * pw * C)  # (N, T*H*W, p*p*c)
         mask = self.unpatchify(mask)  # 1 is removing, 0 is keeping
 
         mask = torch.einsum("ncthw->nthwc", mask)

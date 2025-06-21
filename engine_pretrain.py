@@ -76,9 +76,10 @@ def train_one_epoch(
             visible_mask = visible_mask.to(device, non_blocking=True)
 
         with torch.autocast(device_type=device.type, enabled=not fp32):
-            loss, _, _ = model(
+            loss, _, _, _ = model(
                 samples,
                 mask_ratio=args.mask_ratio,
+                decoder_mask_ratio=args.decoder_mask_ratio,
                 img_mask=img_mask,
                 visible_mask=visible_mask,
             )
@@ -178,9 +179,10 @@ def evaluate(
             visible_mask = visible_mask.to(device, non_blocking=True)
 
         with torch.autocast(device_type=device.type, enabled=not fp32):
-            loss, pred, mask = model(
+            loss, pred, mask, decoder_mask = model(
                 samples,
                 mask_ratio=args.mask_ratio,
+                decoder_mask_ratio=0.0,  # decode all tokens in mask
                 img_mask=img_mask,
                 visible_mask=visible_mask,
             )

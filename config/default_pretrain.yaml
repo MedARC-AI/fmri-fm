@@ -30,6 +30,9 @@ in_chans: 1
 # MAE-st was trained with 0.9 (19 patches)
 mask_ratio: 0.9
 
+# decoder mask ratio for VideoMAEv2 style sparse decoding.
+decoder_mask_ratio: null
+
 # Constraints for the visible mask:
 #   - hemi: visible mask constrained to left or right hemisphere
 #   - inverse_block: visible bask is a local square block 
@@ -57,6 +60,8 @@ t_pred_patch_size: 1
 decoder_depth: 4
 sep_pos_embed: true
 cls_embed: true
+
+init_decoder_scale: null
 
 # Optimization
 epochs: 100

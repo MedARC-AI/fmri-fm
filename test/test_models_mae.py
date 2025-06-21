@@ -83,7 +83,9 @@ def test_mae_vit(
     else:
         visible_mask = None
     
-    loss, pred, mask = model.forward(x, img_mask=img_mask, visible_mask=visible_mask)
+    loss, pred, mask, decoder_mask = model.forward(
+        x, img_mask=img_mask, visible_mask=visible_mask
+    )
     print(
         f"loss: {loss:.3e}, pred: {pred.shape}, "
         f"mask: {mask.shape}, {mask.sum().item()}."
@@ -94,12 +96,21 @@ def test_mae_vit(
 def test_mae_vit_expected_loss():
     # check that model computation doesn't change in case we change implementation.
     torch.manual_seed(42)
-    H = W = 224
-    num_frames = 16
-    in_chans = 3
     model = mae_vit_tiny_patch16()
-    x = torch.randn(2, in_chans, num_frames, H, W)
-    loss, pred, mask = model.forward(x)
+    x = torch.randn(2, 3, 16, 224, 224)
+    loss, pred, mask, decoder_mask = model.forward(x)
     loss_value = loss.item()
     expected_value = 1.3999768495559692
     assert math.isclose(loss_value, expected_value, rel_tol=1e-6)
+
+
+def test_mae_sparse_decode():
+    model = mae_vit_tiny_patch16()
+    x = torch.randn(2, 3, 16, 224, 224)
+    loss, pred, mask, decoder_mask = model.forward(x, decoder_mask_ratio=0.75)
+
+    assert not torch.isnan(loss)
+
+    # check that decoder mask is subset of original mask
+    assert (decoder_mask * (1 - mask)).sum() == 0
+    assert decoder_mask.sum() < mask.sum()
