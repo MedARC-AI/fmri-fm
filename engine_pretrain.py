@@ -182,7 +182,7 @@ def evaluate(
             loss, pred, mask, decoder_mask = model(
                 samples,
                 mask_ratio=args.mask_ratio,
-                decoder_mask_ratio=0.0,  # decode all tokens in mask
+                decoder_mask_ratio=None if args.decoder_mask_ratio is None else 0.0,
                 img_mask=img_mask,
                 visible_mask=visible_mask,
             )
