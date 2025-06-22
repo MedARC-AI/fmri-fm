@@ -534,7 +534,8 @@ class MaskedAutoencoderViT(nn.Module):
         pred = torch.einsum("ncthw->nthwc", pred)
 
         ph, pw = self.patch_embed.patch_size
-        mask = mask.unsqueeze(-1).expand(-1, -1, ph * pw * C)  # (N, T*H*W, p*p*c)
+        pt = self.t_pred_patch_size
+        mask = mask.unsqueeze(-1).expand(-1, -1, pt * ph * pw * C)  # (N, T*H*W, u*p*p*c)
         mask = self.unpatchify(mask)  # 1 is removing, 0 is keeping
 
         mask = torch.einsum("ncthw->nthwc", mask)
