@@ -134,7 +134,9 @@ normalize: false
 # Data loader
 num_workers: 4
 
-checkpoint_period: 1
+checkpoint_period: 5
+max_checkpoints: 4
+
 wandb: true
 wandb_entity: null
 debug: false

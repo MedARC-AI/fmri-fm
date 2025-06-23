@@ -217,6 +217,7 @@ def main(args: DictConfig):
                 loss_scaler=loss_scaler,
                 epoch=epoch,
             )
+            misc.cleanup_checkpoints(args)
 
         log_stats = {
             **{f"train_{k}": v for k, v in train_stats.items()},

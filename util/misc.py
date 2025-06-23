@@ -16,6 +16,7 @@ import os
 import subprocess
 import time
 from collections import defaultdict, deque, OrderedDict
+from pathlib import Path
 
 import util.logging as logging
 import numpy as np
@@ -329,6 +330,8 @@ def get_grad_norm_(parameters, norm_type: float = 2.0) -> torch.Tensor:
 
 def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler):
     checkpoint_path = "{}/checkpoint-{:05d}.pth".format(args.output_dir, epoch)
+    last_checkpoint_path = "{}/checkpoint-last.pth".format(args.output_dir, epoch)
+    
     to_save = {
         "model": model_without_ddp.state_dict(),
         "optimizer": optimizer.state_dict(),
@@ -338,7 +341,17 @@ def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler):
     }
 
     save_on_master(to_save, checkpoint_path)
+    save_on_master(to_save, last_checkpoint_path)
     return checkpoint_path
+
+
+def cleanup_checkpoints(args):
+    """Remove extra checkpoints."""
+    if args.max_checkpoints and is_main_process():
+        checkpoints = sorted(Path(args.output_dir).glob("checkpoint-[0-9]*.pth"))
+        trim_count = max(0, len(checkpoints) - args.max_checkpoints)
+        for path in checkpoints[:trim_count]:
+            path.unlink()
 
 
 def get_last_checkpoint(args):
