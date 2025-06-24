@@ -1,0 +1,16 @@
+num_frames: 16
+output_dir: datasets/flat-clips
+seed: 7293
+
+datasets:
+  hcp-train-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{0000..0009}.tar
+    clipping: random
+
+  hcp-val-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{1800..1809}.tar
+    clipping: random
+
+  nsd-subj01-clips-16t:
+    url: datasets/nsd-flat/nsd-flat_{0000..0009}.tar
+    clipping: random
