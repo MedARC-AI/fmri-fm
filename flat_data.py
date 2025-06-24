@@ -1,15 +1,17 @@
 import inspect
 from functools import partial
-from typing import Any, Callable, Iterable
+from pathlib import Path
+from typing import Any, Callable, Iterable, Literal
 
 import numpy as np
 import torch
 import torchvision.transforms.functional as TF
 import scipy.sparse
 import webdataset as wds
+from torch.utils.data import Dataset
 
 
-def make_flat_dataset(
+def make_flat_wds_dataset(
     url: str | list[str],
     num_frames: int = 16,
     clipping: str = "random",
@@ -38,6 +40,32 @@ def make_flat_dataset(
     return dataset
 
 
+class FlatClipsDataset(Dataset):
+    """
+    Standard folder dataset of pre-extracted fmri flat clips.
+    """
+    def __init__(
+        self,
+        root: str | Path,
+        transform: Callable[[dict[str, Any]], dict[str, Any]] = None,
+    ):
+        self.root = Path(root)
+        self.files = sorted(p.name for p in self.root.glob("*.npy"))
+        self.transform = transform
+
+    def __getitem__(self, idx: int) -> dict[str, Any]:
+        path = self.root / self.files[idx]
+        key = path.stem
+        image = np.load(path)
+        sample = {"__key__": key, "image": image}
+        if self.transform is not None:
+            sample = self.transform(sample)
+        return sample
+
+    def __len__(self):
+        return len(self.files)
+
+
 def extract_flat_sample(sample: dict[str, Any]):
     # sample metadata
     meta = sample["meta.json"]
@@ -53,9 +81,11 @@ def extract_flat_sample(sample: dict[str, Any]):
 
     # fMRI bold data, shape (T, D)
     image_values = sample["bold.npy"]
+
+    # unmask to image, shape (T, H, W). mask encoded as zeros.
     image = np.zeros((len(image_values), *mask.shape), dtype=image_values.dtype)
     image[:, mask] = image_values
-    return {"meta": meta, "events": events, "image": image, "mask": mask}
+    return {"meta": meta, "events": events, "image": image}
 
 
 def random_clips(num_frames: int = 16, oversample: float = 1.0):
@@ -130,38 +160,41 @@ def make_clipping(clipping: str, **kwargs) -> Callable:
 
 
 def make_flat_transform(
-    patch_size: int = 16,
     clip_vmax: float | None = 3.0,
-    normalize: bool = True,
+    normalize: Literal["global", "frame"] | None = None,
     masking: str | None = None,
     masking_kwargs: dict[str, Any] | None = None,
-    eps: float = 1e-6,
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
     """Make sample transform for flat map data.
-
-    If `normalize=True`, globally normalizes the clip to mean zero unit variance. fMRI
-    time series have slow global variation. By normalizing each clip, we can remove some
-    of this.
+    
+    If `normalize='global'`, globally normalizes the clip to mean zero unit variance. If
+    `normalize='frame'`, each temporal is independently normalized. fMRI time series
+    have slow global variation. By normalizing, we can remove some of this.
     """
     if masking:
         masking_kwargs = masking_kwargs or {}
         mask_fn = make_masking(masking, **masking_kwargs)
     else:
         mask_fn = None
+    
+    if normalize:
+        norm_dim = {"global": None, "frame": -1}[normalize]
+        norm_fn = partial(apply_normalize, dim=norm_dim)
+    else:
+        norm_fn = None
 
     def transform(sample: dict[str, Any]):
+        # (T, H, W)
         image = sample["image"]
-        mask = sample["mask"]
+
+        # assume mask coded as zeros.
+        mask = image[0] != 0
 
         image = torch.from_numpy(image).float()
         mask = torch.from_numpy(mask).float()
 
-        # global z-score values of sample.
-        if normalize:
-            mean = image[..., mask > 0].mean()
-            stdev = image[..., mask > 0].std()
-            image = (image - mean) / (stdev + eps)
-            image = image * mask
+        if norm_fn is not None:
+            image = norm_fn(image, mask)
 
         # clip extreme values.
         if clip_vmax and clip_vmax > 0:
@@ -173,15 +206,8 @@ def make_flat_transform(
         else:
             visible_mask = None
 
-        # note, assuming all images are the same size so that padding to multiple is
-        # enough to produce a fixed size image.
-        # TODO: as a way to handle mask more generically, could stack with image along
-        # channel dimension, then chunk later and convert back to 0, 1. this way, can do
-        # geometric transforms.
-        image = pad_to_multiple(image, patch_size)
-        mask = pad_to_multiple(mask, patch_size)
-        if visible_mask is not None:
-            visible_mask = pad_to_multiple(visible_mask, patch_size)
+        # TODO: we may soon want to do cropping. to support this, could stack image with
+        # mask channel wise to apply crops and then chunk back after.
 
         # (C, T, H, W)
         image = image[None]
@@ -266,6 +292,16 @@ def make_masking(masking: str, **kwargs) -> Callable:
     kwargs = filter_kwargs(mask_fn, kwargs)
     mask_fn = partial(mask_fn, **kwargs)
     return mask_fn
+
+
+def apply_normalize(
+    image: torch.Tensor, mask: torch.Tensor, dim: int | None = None, eps: float = 1e-6
+) -> torch.Tensor:
+    mean = image[..., mask > 0].mean(dim=dim, keepdim=True).unsqueeze(-1)
+    std = image[..., mask > 0].std(dim=dim, keepdim=True).unsqueeze(-1)
+    image = (image - mean) / (std + eps)
+    image = image * mask
+    return image
 
 
 def pad_to_multiple(img: torch.Tensor, patch_size: int) -> torch.Tensor:

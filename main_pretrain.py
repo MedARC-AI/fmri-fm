@@ -28,9 +28,10 @@ import models_mae
 import wandb
 from iopath.common.file_io import g_pathmgr as pathmgr
 from omegaconf import DictConfig, OmegaConf
+from torch.utils.data.distributed import DistributedSampler
 from webdataset import WebLoader as DataLoader
 from engine_pretrain import train_one_epoch, evaluate
-from flat_data import make_flat_dataset, make_flat_transform
+from flat_data import FlatClipsDataset, make_flat_wds_dataset, make_flat_transform
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 PROJECT = "fMRI-foundation-model"
@@ -66,40 +67,7 @@ def main(args: DictConfig):
 
     cudnn.benchmark = True
 
-    sample_transform = make_flat_transform(
-        clip_vmax=args.clip_vmax,
-        normalize=args.normalize,
-        masking=args.masking,
-        masking_kwargs=args.masking_kwargs,
-    )
-
-    data_loaders = {}
-    total_num_batches = {}
-    for dataset_name, dataset_config in args.datasets.items():
-        print(f"dataset: {dataset_name}\n\n{OmegaConf.to_yaml(dataset_config)}")
-
-        dataset_config = dataset_config.copy() 
-        samples_per_epoch = dataset_config.pop("samples_per_epoch")
-
-        dataset = make_flat_dataset(num_frames=args.num_frames, **dataset_config)
-        dataset = dataset.map(sample_transform)
-
-        loader = DataLoader(
-            dataset,
-            batch_size=args.batch_size,
-            shuffle=False,
-            num_workers=args.num_workers,
-            pin_memory=True,
-            drop_last=True,
-        )
-
-        # nb, setting the epoch length on the dataloader means we don't have to account
-        # for the parallel data loading workers.
-        num_batches = samples_per_epoch // (misc.get_world_size() * args.batch_size)
-        loader = loader.with_epoch(num_batches)
-
-        data_loaders[dataset_name] = loader
-        total_num_batches[dataset_name] = num_batches
+    data_loaders, samplers, total_num_batches = make_data_loaders(args)
 
     data_loader_train = data_loaders["train"]
     data_loaders_eval = data_loaders.copy()
@@ -176,6 +144,11 @@ def main(args: DictConfig):
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     for epoch in range(args.start_epoch, args.epochs):
+        if args.distributed:
+            for sampler in samplers.values():
+                if sampler is not None:
+                    sampler.set_epoch(epoch)
+
         train_stats = train_one_epoch(
             model,
             data_loader_train,
@@ -252,6 +225,63 @@ def main(args: DictConfig):
     print("Training time {}".format(total_time_str))
     print(torch.cuda.memory_allocated())
     return [checkpoint_path]
+
+
+def make_data_loaders(args: DictConfig):
+
+    transform = make_flat_transform(
+        clip_vmax=args.clip_vmax,
+        normalize=args.normalize,
+        masking=args.masking,
+        masking_kwargs=args.masking_kwargs,
+    )
+
+    data_loaders = {}
+    samplers = {}
+    total_num_batches = {}
+
+    for dataset_name, dataset_config in args.datasets.items():
+        print(f"dataset: {dataset_name}\n\n{OmegaConf.to_yaml(dataset_config)}")
+
+        dataset_type = dataset_config.pop("type")
+
+        if dataset_type == "flat-wds":
+            samples_per_epoch = dataset_config.pop("samples_per_epoch")
+            dataset = make_flat_wds_dataset(num_frames=args.num_frames, **dataset_config)
+            dataset = dataset.map(transform)
+            sampler = None
+            # the shuffle happens inside the dataset with a buffer.
+            shuffle = False
+        elif dataset_type == "flat-clips":
+            dataset = FlatClipsDataset(dataset_config.root, transform=transform)
+            if args.distributed:
+                sampler = DistributedSampler(dataset, shuffle=dataset_config.shuffle)
+            else:
+                sampler = None
+            samples_per_epoch = len(dataset)
+            shuffle = sampler is None and dataset_config.shuffle
+        else:
+            raise ValueError(f"Unknown dataset type {dataset_type}.")
+
+        loader = DataLoader(
+            dataset,
+            batch_size=args.batch_size,
+            sampler=sampler,
+            shuffle=shuffle,
+            num_workers=args.num_workers,
+            pin_memory=True,
+            drop_last=True,
+        )
+
+        # setting the epoch length is needed for infinite wds loaders
+        num_batches = samples_per_epoch // (misc.get_world_size() * args.batch_size)
+        loader = loader.with_epoch(num_batches)
+
+        data_loaders[dataset_name] = loader
+        samplers[dataset_name] = sampler
+        total_num_batches[dataset_name] = num_batches
+
+    return data_loaders, samplers, total_num_batches
 
 
 if __name__ == "__main__":
