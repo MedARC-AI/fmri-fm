@@ -186,12 +186,10 @@ def make_flat_transform(
     def transform(sample: dict[str, Any]):
         # (T, H, W)
         image = sample["image"]
+        image = torch.from_numpy(image).float()
 
         # assume mask coded as zeros.
         mask = image[0] != 0
-
-        image = torch.from_numpy(image).float()
-        mask = torch.from_numpy(mask).float()
 
         if norm_fn is not None:
             image = norm_fn(image, mask)
@@ -297,8 +295,9 @@ def make_masking(masking: str, **kwargs) -> Callable:
 def apply_normalize(
     image: torch.Tensor, mask: torch.Tensor, dim: int | None = None, eps: float = 1e-6
 ) -> torch.Tensor:
-    mean = image[..., mask > 0].mean(dim=dim, keepdim=True).unsqueeze(-1)
-    std = image[..., mask > 0].std(dim=dim, keepdim=True).unsqueeze(-1)
+    image_values = image[..., mask > 0]
+    mean = image_values.mean(dim=dim, keepdim=True).unsqueeze(-1)
+    std = image_values.std(dim=dim, keepdim=True).unsqueeze(-1)
     image = (image - mean) / (std + eps)
     image = image * mask
     return image

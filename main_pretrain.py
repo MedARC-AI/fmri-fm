@@ -25,6 +25,7 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import models_mae
+import models_mae_linear
 import wandb
 from iopath.common.file_io import g_pathmgr as pathmgr
 from omegaconf import DictConfig, OmegaConf
@@ -37,6 +38,8 @@ from util.misc import NativeScalerWithGradNormCount as NativeScaler
 PROJECT = "fMRI-foundation-model"
 
 DEFAULT_CONFIG = Path(__file__).parent / "config/default_pretrain.yaml"
+
+MODELS_DICT = {**models_mae.__dict__, **models_mae_linear.__dict__}
 
 
 def main(args: DictConfig):
@@ -89,12 +92,15 @@ def main(args: DictConfig):
             OmegaConf.save(args, out_cfg_path)
 
     # define the model
-    model = models_mae.__dict__[args.model](**args)
+    model = MODELS_DICT[args.model](**args)
 
     model.to(device)
 
     model_without_ddp = model
     print("Model = %s" % str(model_without_ddp))
+    
+    num_params = sum(p.numel() for p in model_without_ddp.parameters())
+    print(f"Num params = {num_params / 1e6:.1f}M")
 
     eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()
 

@@ -153,7 +153,7 @@ def evaluate(
     model.eval()
     metric_logger = misc.MetricLogger(delimiter="  ")
     header = f"Eval ({eval_name}): [{epoch}]"
-    print_freq = 1 if args.debug else 20
+    print_freq = 1 if args.debug else 50
     debug_steps = 10
     log_wandb = misc.is_main_process() and log_wandb
 

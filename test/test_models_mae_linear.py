@@ -1,25 +1,13 @@
-import math
 
 import pytest
 import torch
 from timm.layers import to_2tuple
 
-from models_mae import MaskedAutoencoderViT
+from models_mae_linear import MaskedAutoencoderLinear
 
 
-def mae_vit_tiny_patch16(**kwargs):
-    model = MaskedAutoencoderViT(
-        patch_size=16,
-        embed_dim=192,
-        depth=6,
-        num_heads=3,
-        decoder_embed_dim=192,
-        decoder_depth=2,
-        decoder_num_heads=3,
-        sep_pos_embed=True,
-        cls_embed=True,
-        **kwargs,
-    )
+def mae_linear_tiny_patch16(**kwargs):
+    model = MaskedAutoencoderLinear(patch_size=16, embed_dim=192, **kwargs)
     return model
 
 
@@ -36,20 +24,18 @@ def mae_vit_tiny_patch16(**kwargs):
     "img_size,in_chans,num_frames,t_patch_size,t_pred_patch_size",
     [
         # default case
-        (224, 3, 16, 2, 1),
+        (64, 3, 8, 2, 1),
         # single channel
-        (224, 1, 16, 2, 1),
-        # predict all frames
-        (224, 1, 16, 2, 2),
-        # mae case, t_patch_size = num_frames, predict one frame
-        (224, 1, 16, 16, 1),
+        (64, 1, 8, 2, 1),
         # mae case, t_patch_size = num_frames, predict all frames
-        (224, 1, 16, 16, 16),
+        (64, 1, 8, 8, 8),
         # non-square image
-        ([144, 224], 1, 16, 2, 1),
+        ([64, 96], 1, 8, 2, 1),
     ]
 )
-def test_mae_vit(
+@pytest.mark.parametrize("framewise", [False, True])
+def test_mae_linear(
+    framewise: bool,
     img_size: int | tuple[int, int],
     in_chans: int,
     num_frames: int,
@@ -62,12 +48,13 @@ def test_mae_vit(
     img_size = to_2tuple(img_size)
     H, W = img_size
 
-    model = mae_vit_tiny_patch16(
+    model = mae_linear_tiny_patch16(
         img_size=img_size,
         in_chans=in_chans,
         num_frames=num_frames,
         t_patch_size=t_patch_size,
         t_pred_patch_size=t_pred_patch_size,
+        framewise=framewise,
     )
 
     x = torch.randn(2, in_chans, num_frames, H, W)
@@ -91,27 +78,4 @@ def test_mae_vit(
         f"mask: {mask.shape}, {mask.sum().item()}."
     )
     assert not torch.isnan(loss)
-    assert loss.item() < 3
-
-
-def test_mae_vit_expected_loss():
-    # check that model computation doesn't change in case we change implementation.
-    torch.manual_seed(42)
-    model = mae_vit_tiny_patch16()
-    x = torch.randn(2, 3, 16, 224, 224)
-    loss, pred, mask, decoder_mask = model.forward(x)
-    loss_value = loss.item()
-    expected_value = 1.3999768495559692
-    assert math.isclose(loss_value, expected_value, rel_tol=1e-6)
-
-
-def test_mae_sparse_decode():
-    model = mae_vit_tiny_patch16()
-    x = torch.randn(2, 3, 16, 224, 224)
-    loss, pred, mask, decoder_mask = model.forward(x, decoder_mask_ratio=0.75)
-
-    assert not torch.isnan(loss)
-
-    # check that decoder mask is subset of original mask
-    assert (decoder_mask * (1 - mask)).sum() == 0
-    assert decoder_mask.sum() < mask.sum()
+    assert loss.item() < 4
