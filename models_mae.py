@@ -555,13 +555,59 @@ class MaskedAutoencoderViT(nn.Module):
         return target, pred, mask, im_masked, im_paste, img_mask
 
 
+def mae_vit_nano_patch16(**kwargs):
+    model = MaskedAutoencoderViT(
+        patch_size=16,
+        embed_dim=192,
+        depth=3,
+        num_heads=3,
+        decoder_embed_dim=192,
+        decoder_num_heads=3,
+        mlp_ratio=4,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
+        **kwargs,
+    )
+    return model
+
+
+def mae_vit_micro_patch16(**kwargs):
+    model = MaskedAutoencoderViT(
+        patch_size=16,
+        embed_dim=192,
+        depth=6,
+        num_heads=3,
+        decoder_embed_dim=192,
+        decoder_num_heads=3,
+        mlp_ratio=4,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
+        **kwargs,
+    )
+    return model
+
+
+def mae_vit_tiny_patch16(**kwargs):
+    model = MaskedAutoencoderViT(
+        patch_size=16,
+        embed_dim=192,
+        depth=12,
+        num_heads=3,
+        decoder_embed_dim=192,
+        decoder_num_heads=3,
+        mlp_ratio=4,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
+        **kwargs,
+    )
+    return model
+
+
 def mae_vit_small_patch16(**kwargs):
-    # nb, decoder is fixed across encoder sizes to embed dim 512.
     model = MaskedAutoencoderViT(
         patch_size=16,
         embed_dim=384,
         depth=12,
         num_heads=6,
+        decoder_embed_dim=384,
+        decoder_num_heads=6,
         mlp_ratio=4,
         norm_layer=partial(nn.LayerNorm, eps=1e-6),
         **kwargs,
