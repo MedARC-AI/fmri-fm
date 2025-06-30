@@ -17,11 +17,11 @@ datasets:
     clipping: random
 
   hcp-train-task-clips-16t:
-    url: datasets/hcp-flat/hcp-flat_{0000..1799..10}.tar
+    url: datasets/hcp-flat/hcp-flat_{0000..1799}.tar
     clipping: event
     target_id_map: datasets/hcp_trial_type_target_id_map.json
 
   hcp-val-task-clips-16t:
-    url: datasets/hcp-flat/hcp-flat_{1800..1819}.tar
+    url: datasets/hcp-flat/hcp-flat_{1800..1899}.tar
     clipping: event
     target_id_map: datasets/hcp_trial_type_target_id_map.json
