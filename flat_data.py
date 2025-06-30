@@ -1,4 +1,5 @@
 import inspect
+import json
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal
@@ -16,6 +17,8 @@ def make_flat_wds_dataset(
     num_frames: int = 16,
     clipping: str = "random",
     clipping_kwargs: dict[str, Any] | None = None,
+    target_id_map: dict[str, int] | str | Path | None = None,
+    target_key: str = "trial_type",
     shuffle: bool = True,
 ) -> wds.WebDataset:
     """Make fMRI flat map dataset."""
@@ -35,6 +38,10 @@ def make_flat_wds_dataset(
     clip_fn = make_clipping(clipping, num_frames=num_frames, **clipping_kwargs)
     dataset = dataset.compose(clip_fn)
 
+    # add targets
+    if target_id_map is not None:
+        dataset = dataset.compose(with_targets(target_id_map, target_key=target_key))
+
     if shuffle:
         dataset = dataset.shuffle(1000)
     return dataset
@@ -50,14 +57,12 @@ class FlatClipsDataset(Dataset):
         transform: Callable[[dict[str, Any]], dict[str, Any]] = None,
     ):
         self.root = Path(root)
-        self.files = sorted(p.name for p in self.root.glob("*.npy"))
+        self.files = sorted(p.name for p in self.root.glob("*.pt"))
         self.transform = transform
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
         path = self.root / self.files[idx]
-        key = path.stem
-        image = np.load(path)
-        sample = {"__key__": key, "image": image}
+        sample = torch.load(path, weights_only=True)
         if self.transform is not None:
             sample = self.transform(sample)
         return sample
@@ -103,7 +108,13 @@ def random_clips(num_frames: int = 16, oversample: float = 1.0):
             for start in indices:
                 # copy to avoid a memory leak when used with a shuffle buffer.
                 clip = image[start : start + num_frames].copy()
-                yield {**sample, "image": clip, "start": start}
+
+                yield {
+                    "__key__": sample["__key__"],
+                    **sample["meta"],
+                    "image": clip,
+                    "start": start,
+                }
 
     return _filter
 
@@ -120,7 +131,13 @@ def sequential_clips(num_frames: int = 16, stride: int | None = None):
             image = sample["image"]
             for start in range(0, len(image) - num_frames + 1, stride):
                 clip = image[start : start + num_frames].copy()
-                yield {**sample, "image": clip, "start": start}
+
+                yield {
+                    "__key__": sample["__key__"],
+                    **sample["meta"],
+                    "image": clip,
+                    "start": start,
+                }
 
     return _filter
 
@@ -141,7 +158,14 @@ def event_clips(num_frames: int = 16, tr: float = 1.0, hrf_delay: float = 0.0):
                 if start + num_frames > len(image):
                     continue
                 clip = image[start : start + num_frames].copy()
-                yield {**sample, "image": clip, "start": start, **event}
+
+                yield {
+                    "__key__": sample["__key__"],
+                    **sample["meta"],
+                    "image": clip,
+                    "start": start,
+                    **event,
+                }
 
     return _filter
 
@@ -159,6 +183,27 @@ def make_clipping(clipping: str, **kwargs) -> Callable:
     return clip_fn(**kwargs)
 
 
+def with_targets(
+    target_id_map: dict[str, int] | str | Path | None = None,
+    target_key: str = "trial_type",
+):
+    """Webdataset filter to augment samples with targets."""
+
+    if isinstance(target_id_map, (str, Path)):
+        with open(target_id_map) as f:
+            target_id_map = json.load(f)
+
+    def _filter(dataset: Iterable[dict[str, Any]]):
+        for sample in dataset:
+            label = sample.get(target_key)
+            if label not in target_id_map:
+                continue
+            target = target_id_map[label]
+            yield {**sample, "target": target}
+
+    return _filter
+
+
 def make_flat_transform(
     clip_vmax: float | None = 3.0,
     normalize: Literal["global", "frame"] | None = None,
@@ -166,7 +211,7 @@ def make_flat_transform(
     masking_kwargs: dict[str, Any] | None = None,
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
     """Make sample transform for flat map data.
-    
+
     If `normalize='global'`, globally normalizes the clip to mean zero unit variance. If
     `normalize='frame'`, each temporal is independently normalized. fMRI time series
     have slow global variation. By normalizing, we can remove some of this.
@@ -176,7 +221,7 @@ def make_flat_transform(
         mask_fn = make_masking(masking, **masking_kwargs)
     else:
         mask_fn = None
-    
+
     if normalize:
         norm_dim = {"global": None, "frame": -1}[normalize]
         norm_fn = partial(apply_normalize, dim=norm_dim)
@@ -186,7 +231,7 @@ def make_flat_transform(
     def transform(sample: dict[str, Any]):
         # (T, H, W)
         image = sample["image"]
-        image = torch.from_numpy(image).float()
+        image = torch.as_tensor(image).float()
 
         # assume mask coded as zeros.
         mask = image[0] != 0
@@ -213,9 +258,7 @@ def make_flat_transform(
         if visible_mask is not None:
             visible_mask = visible_mask[None, None]
 
-        # drop other keys bc they may be hard to collate.
-        # later we may want to keep some of the other data, or include targets.
-        sample = {"image": image, "mask": mask}
+        sample = {**sample, "image": image, "mask": mask}
         if visible_mask is not None:
             sample["visible_mask"] = visible_mask
         return sample

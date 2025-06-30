@@ -1,15 +1,12 @@
 import argparse
-import datetime
-import json
-import os
-import random
-import time
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import torch
 from omegaconf import DictConfig, OmegaConf
 from timm.utils import random_seed
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from flat_data import make_flat_wds_dataset
@@ -28,19 +25,28 @@ def main(args: DictConfig):
         random_seed(args.seed)
         dataset = make_flat_wds_dataset(**dataset_config, shuffle=False)
 
+        loader = DataLoader(
+            dataset, batch_size=None, shuffle=False, num_workers=cfg.num_workers
+        )
         dataset_dir = Path(output_dir / dataset_name)
         dataset_dir.mkdir()
 
-        for ii, sample in enumerate(tqdm(dataset)):
+        for ii, sample in enumerate(tqdm(loader)):
             save_sample(ii, sample, dataset_dir)
 
 
 def save_sample(sample_id: int, sample: dict[str, Any], dataset_dir: Path):
-    key = sample["__key__"]
-    start = sample["start"]
-    image = sample["image"]
-    path = dataset_dir / f"{sample_id:07d}_{key}_start-{start:05d}.npy"
-    np.save(path, image)
+    sample = {k: cast_value(v) for k, v in sample.items()}
+    path = dataset_dir / f"{sample_id:07d}.pt"
+    torch.save(sample, path)
+
+
+def cast_value(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        value = torch.from_numpy(value)
+    elif isinstance(value, np.generic):
+        value = value.item()
+    return value
 
 
 if __name__ == "__main__":

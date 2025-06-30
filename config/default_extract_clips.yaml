@@ -1,6 +1,7 @@
 num_frames: 16
 output_dir: datasets/flat-clips
 seed: 7293
+num_workers: 4
 
 datasets:
   hcp-train-clips-16t:
@@ -14,3 +15,13 @@ datasets:
   nsd-subj01-clips-16t:
     url: datasets/nsd-flat/nsd-flat_{0000..0009}.tar
     clipping: random
+
+  hcp-train-task-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{0000..1799..10}.tar
+    clipping: event
+    target_id_map: datasets/hcp_trial_type_target_id_map.json
+
+  hcp-val-task-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{1800..1819}.tar
+    clipping: event
+    target_id_map: datasets/hcp_trial_type_target_id_map.json
