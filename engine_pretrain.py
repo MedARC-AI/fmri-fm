@@ -17,7 +17,6 @@ import util.misc as misc
 import util.visualization as vis
 import torch
 import wandb
-from iopath.common.file_io import g_pathmgr as pathmgr
 
 
 def train_one_epoch(
@@ -87,13 +86,6 @@ def train_one_epoch(
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):
-            for _ in range(args.num_checkpoint_del):
-                try:
-                    path = misc.get_last_checkpoint(args)
-                    pathmgr.rm(path)
-                    print(f"remove checkpoint {path}")
-                except Exception as _:
-                    pass
             raise Exception("Loss is {}, stopping training".format(loss_value))
 
         loss /= accum_iter
@@ -111,13 +103,13 @@ def train_one_epoch(
         torch.cuda.synchronize()
 
         metric_logger.update(loss=loss_value)
+        lr = optimizer.param_groups[0]["lr"]
+        metric_logger.update(lr=lr)
         metric_logger.update(cpu_mem=misc.cpu_mem_usage()[0])
         metric_logger.update(cpu_mem_all=misc.cpu_mem_usage()[1])
         metric_logger.update(gpu_mem=misc.gpu_mem_usage())
         # TODO: log mask stats?
 
-        lr = optimizer.param_groups[0]["lr"]
-        metric_logger.update(lr=lr)
 
         loss_value_reduce = misc.all_reduce_mean(loss_value)
         if log_wandb and (data_iter_step + 1) % accum_iter == 0:
@@ -225,9 +217,9 @@ def evaluate(
     if log_wandb:
         # eval at the end of training, so epoch + 1
         epoch_1000x = int((epoch + 1) * 1000)
-        wandb.log({f"test/{eval_name}/{k}": v for k, v in stats.items()}, step=epoch_1000x)
+        wandb.log({f"eval/{eval_name}/{k}": v for k, v in stats.items()}, step=epoch_1000x)
         wandb.log(
-            {f"test/{eval_name}/{k}": wandb.Image(img) for k, img in plots.items()},
+            {f"eval/{eval_name}/{k}": wandb.Image(img) for k, img in plots.items()},
             step=epoch_1000x,
         )
 

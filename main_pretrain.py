@@ -7,9 +7,7 @@
 # References:
 # DeiT: https://github.com/facebookresearch/deit
 # BEiT: https://github.com/microsoft/unilm/tree/master/beit
-#
-# Forked from MAE-st:
-# https://github.com/facebookresearch/mae_st
+# MAE-st: https://github.com/facebookresearch/mae_st
 # --------------------------------------------------------
 import argparse
 import datetime
@@ -60,6 +58,19 @@ def main(args: DictConfig):
     print(misc.get_sha())
     print("config:", OmegaConf.to_yaml(args), sep="\n")
 
+    if global_rank == 0 and args.output_dir:
+        if args.name:
+            args.output_dir = f"{args.output_dir}/{args.name}"
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        out_cfg_path = output_dir / "config.yaml"
+        if out_cfg_path.exists():
+            prev_cfg = OmegaConf.load(out_cfg_path)
+            assert args == prev_cfg, "current config doesn't match previous config"
+        else:
+            OmegaConf.save(args, out_cfg_path)
+
     device = torch.device(args.device)
 
     # fix the seed for reproducibility
@@ -78,19 +89,6 @@ def main(args: DictConfig):
 
     num_batches_train = total_num_batches["train"]
 
-    if global_rank == 0 and args.output_dir:
-        if args.name:
-            args.output_dir = f"{args.output_dir}/{args.name}"
-        output_dir = Path(args.output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        out_cfg_path = output_dir / "config.yaml"
-        if out_cfg_path.exists():
-            prev_cfg = OmegaConf.load(out_cfg_path)
-            assert args == prev_cfg, "current config doesn't match previous config"
-        else:
-            OmegaConf.save(args, out_cfg_path)
-
     # define the model
     model = MODELS_DICT[args.model](**args)
 
@@ -106,7 +104,7 @@ def main(args: DictConfig):
 
     args.lr = args.base_lr * eff_batch_size / 256
 
-    print("base lr: %.2e" % (args.lr * 256 / eff_batch_size))
+    print("base lr: %.2e" % args.base_lr)
     print("actual lr: %.2e" % args.lr)
 
     print("accumulate grad iterations: %d" % args.accum_iter)
@@ -199,9 +197,9 @@ def main(args: DictConfig):
             misc.cleanup_checkpoints(args)
 
         log_stats = {
-            **{f"train_{k}": v for k, v in train_stats.items()},
+            **{f"train__{k}": v for k, v in train_stats.items()},
             **{
-                f"test_{ds_name}_{k}": v for ds_name, ds_stats in eval_stats.items()
+                f"eval__{ds_name}__{k}": v for ds_name, ds_stats in eval_stats.items()
                 for k, v in ds_stats.items()
             },
             "epoch": epoch,
@@ -215,7 +213,7 @@ def main(args: DictConfig):
                 f.write(json.dumps(log_stats) + "\n")
 
         log_plots = {
-            f"test_{ds_name}_{k}": img for ds_name, ds_plots in eval_plots.items()
+            f"eval__{ds_name}__{k}": img for ds_name, ds_plots in eval_plots.items()
             for k, img in ds_plots.items()
         }
 
