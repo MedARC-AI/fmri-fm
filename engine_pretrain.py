@@ -156,6 +156,10 @@ def evaluate(
 
     example_iter = np.random.randint(0, debug_steps if args.debug else num_batches)
 
+    # fixed random generator for random masking reproducibility
+    generator = torch.Generator(device)
+    generator.manual_seed(42)
+
     for data_iter_step, batch in enumerate(
         metric_logger.log_every(
             data_loader, print_freq, header, total_steps=num_batches
@@ -177,6 +181,7 @@ def evaluate(
                 decoder_mask_ratio=None if args.decoder_mask_ratio is None else 0.0,
                 img_mask=img_mask,
                 visible_mask=visible_mask,
+                generator=generator,
             )
 
         loss_value = loss.item()

@@ -246,12 +246,13 @@ class MaskedAutoencoderViT(nn.Module):
         imgs = x.reshape(shape=(N, C, T, H, W))
         return imgs
 
-    def random_masking(self, x, mask_ratio, visible_patch_mask):
+    def random_masking(self, x, mask_ratio, visible_patch_mask, generator):
         """
         Perform per-sample random masking by per-sample shuffling.
         Per-sample shuffling is done by argsort random noise.
         x: [N, L, D], sequence
         visible_patch_mask: [N, L] mask of visible patches, 1=visible, 0=not visible
+        generator: torch.Generator or None, for reproducibility
         """
         N, L, D = x.shape  # batch, length, dim
 
@@ -262,7 +263,7 @@ class MaskedAutoencoderViT(nn.Module):
             total_patches = L
         len_keep = int(total_patches * (1 - mask_ratio))
 
-        noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
+        noise = torch.rand(N, L, device=x.device, generator=generator)  # noise in [0, 1]
 
         # shift invisible patches to not be selected
         if visible_patch_mask is not None:
@@ -342,7 +343,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x
 
-    def forward_encoder(self, x, mask_ratio, visible_mask):
+    def forward_encoder(self, x, mask_ratio, visible_mask, generator):
         """
         x: [N, C, T, H, W]
         visible_mask: [N, C, T, H, W] mask of visible pixels, 1=visible, 0=not visible
@@ -363,7 +364,9 @@ class MaskedAutoencoderViT(nn.Module):
         x = x.reshape(N, T * L, C)
 
         # masking: length -> length * mask_ratio
-        x, mask, ids_keep = self.random_masking(x, mask_ratio, visible_patch_mask)
+        x, mask, ids_keep = self.random_masking(
+            x, mask_ratio, visible_patch_mask, generator
+        )
 
         x = self.apply_pos_embed(x, ids_keep)
 
@@ -379,7 +382,9 @@ class MaskedAutoencoderViT(nn.Module):
 
         return prefix, x, mask, ids_keep
 
-    def forward_decoder(self, x, mask, ids_keep, decoder_mask_ratio, img_mask):
+    def forward_decoder(
+        self, x, mask, ids_keep, decoder_mask_ratio, img_mask, generator
+    ):
         # embed tokens to match embed dims
         x = self.decoder_embed(x)
 
@@ -411,7 +416,7 @@ class MaskedAutoencoderViT(nn.Module):
 
             # select which tokens to decode
             mask_tokens, decoder_mask, decoder_ids_keep = self.random_masking(
-                mask_tokens, decoder_mask_ratio, decoder_patch_mask
+                mask_tokens, decoder_mask_ratio, decoder_patch_mask, generator
             )
 
             # append selected mask tokens
@@ -492,6 +497,7 @@ class MaskedAutoencoderViT(nn.Module):
         decoder_mask_ratio=None,
         img_mask=None,
         visible_mask=None,
+        generator=None,
     ):
         if visible_mask is None:
             visible_mask = img_mask
@@ -504,10 +510,10 @@ class MaskedAutoencoderViT(nn.Module):
             visible_mask = visible_mask.expand_as(imgs)
 
         prefix, latent, mask, ids_keep = self.forward_encoder(
-            imgs, mask_ratio, visible_mask
+            imgs, mask_ratio, visible_mask, generator
         )
         pred, decoder_mask = self.forward_decoder(
-            latent, mask, ids_keep, decoder_mask_ratio, img_mask
+            latent, mask, ids_keep, decoder_mask_ratio, img_mask, generator
         )
         loss = self.forward_loss(imgs, pred, decoder_mask, img_mask)
         return loss, pred, mask, decoder_mask
@@ -518,6 +524,7 @@ class MaskedAutoencoderViT(nn.Module):
         mask_ratio=0.0,
         img_mask=None,
         visible_mask=None,
+        generator=None,
     ):
         if visible_mask is None:
             visible_mask = img_mask
@@ -530,7 +537,7 @@ class MaskedAutoencoderViT(nn.Module):
             visible_mask = visible_mask.expand_as(imgs)
 
         prefix, latent, mask, ids_keep = self.forward_encoder(
-            imgs, mask_ratio, visible_mask
+            imgs, mask_ratio, visible_mask, generator
         )
 
         N, _, C = latent.shape
