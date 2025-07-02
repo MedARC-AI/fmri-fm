@@ -285,15 +285,16 @@ class NativeScalerWithGradNormCount:
         update_grad=True,
     ):
         self._scaler.scale(loss).backward(create_graph=create_graph)
+
+        if parameters is None:
+            parameters = [p for group in optimizer.param_groups for p in group["params"]]
+
         if update_grad:
+            # unscale the gradients of optimizer's assigned params in-place
+            self._scaler.unscale_(optimizer)
             if clip_grad is not None:
-                assert parameters is not None
-                self._scaler.unscale_(
-                    optimizer
-                )  # unscale the gradients of optimizer's assigned params in-place
                 norm = torch.nn.utils.clip_grad_norm_(parameters, clip_grad)
             else:
-                self._scaler.unscale_(optimizer)
                 norm = get_grad_norm_(parameters)
             self._scaler.step(optimizer)
             self._scaler.update()
@@ -330,7 +331,7 @@ def get_grad_norm_(parameters, norm_type: float = 2.0) -> torch.Tensor:
 
 def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler):
     checkpoint_path = "{}/checkpoint-{:05d}.pth".format(args.output_dir, epoch)
-    last_checkpoint_path = "{}/checkpoint-last.pth".format(args.output_dir, epoch)
+    last_checkpoint_path = "{}/checkpoint-last.pth".format(args.output_dir)
     
     to_save = {
         "model": model_without_ddp.state_dict(),
@@ -400,10 +401,15 @@ def load_model(args, model_without_ddp, optimizer, loss_scaler):
 def all_reduce_mean(x):
     world_size = get_world_size()
     if world_size > 1:
-        x_reduce = torch.tensor(x).cuda()
+        is_item = not isinstance(x, torch.Tensor)
+        if is_item:
+            x_reduce = torch.tensor(x).cuda()
+        else:
+            x_reduce = x.detach().clone()
         dist.all_reduce(x_reduce)
         x_reduce /= world_size
-        return x_reduce.item()
+        if is_item:
+            x_reduce = x_reduce.item()
     else:
         return x
 
