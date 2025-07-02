@@ -77,7 +77,6 @@ def main(args: DictConfig):
             OmegaConf.save(args, out_cfg_path)
 
     device = torch.device(args.device)
-    torch.cuda.set_device(device)
 
     # fix the seed for reproducibility
     seed = args.seed + misc.get_rank()
