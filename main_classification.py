@@ -532,7 +532,7 @@ def train_one_epoch(
                 (data_iter_step / num_batches + epoch) * 1000
             )
             log_stats = {
-                "train/loss": loss_value
+                "train/loss": loss_value,
                 **{f"train/{k}": v for k, v in log_loss_dict.items()}
             }
             wandb.log(log_stats, step=epoch_1000x)
