@@ -1,0 +1,156 @@
+# Name of the run. For output directory and wandb.
+name: hcp_task_classification
+
+# Description of the run. Goes in wandb notes.
+notes: null
+
+output_dir: checkpoints
+seed: 7338
+start_epoch: 0
+
+# Path to checkpoint to load initial weights.
+checkpoint: null
+
+# Whether to do full-finetuning, or frozen probe evaluation.
+finetune: false
+
+# Path to checkpoint to resume training.
+resume: null
+
+# Model
+model: mae_vit_base_patch16
+
+# Standard image size of fmri flat datasets.
+img_size: [224, 560]
+in_chans: 1
+
+# Mask ratio
+# note that the number of visible patches is computed as
+#   len_keep = (T // t) * (H // h) * (W // w) * (1 - mask_ratio)
+# where (T, H, W) is the clip size and (t, h, w) is the patch size.
+#
+# so for image size (224, 560) we get the following patches per frame:
+#   - 0.75:  122
+#   - 0.804: 96
+#   - 0.869: 64
+#   - 0.9:   48
+#   - 0.96:  19
+#
+# for comparison, original MAE was trained with 0.75 on 224 x 224 (49 patches), while
+# MAE-st was trained with 0.9 (19 patches)
+mask_ratio: 0.9
+
+# decoder mask ratio for VideoMAEv2 style sparse decoding.
+decoder_mask_ratio: null
+
+# Constraints for the visible mask:
+#   - hemi: visible mask constrained to left or right hemisphere
+#   - inverse_block: visible bask is a local square block
+#   - hemi_inverse_block: visible bask is a square block constrained to one hemi
+# Default is unconstrained uniform masking.
+masking: null
+masking_kwargs:
+  # size of the visible block for inverse block masking.
+  # note this is intersected with the valid data mask, so not all pixels in the block
+  # will ultimately be visible. so should overestimate relative to the desired number of
+  # visible patches.
+  block_size: 160
+
+# Temporal config.
+# t_pred_patch_size controls how many input frames the decoder predicts. MAE-st default
+# is to just predict the first frame of each input temporal patch. Setting
+# t_pred_patch_size = t_patch_size predicts all input frames. t_pred_patch_size must
+# divide t_patch_size.
+#
+# setting num_frames = t_patch_size = t_pred_patch_size recovers standard MAE.
+num_frames: 16
+t_patch_size: 2
+t_pred_patch_size: 1
+
+decoder_depth: 4
+sep_pos_embed: true
+cls_embed: true
+
+init_decoder_scale: null
+
+# Classifier settings
+# Classifier input pooled embeddings.
+representations:
+- cls
+- avg_patch
+- patch
+
+# Grid of learning rate scale factors and weight decays for linear classifiers.
+# Copied from CAPI.
+lr_scale_grid: [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0]
+weight_decay_grid: [5e-4, 1e-3, 5e-2]
+
+# Optimization
+epochs: 100
+# batch size per gpu, so total_batch_size = batch_size * num_gpus_per_node * num_nodes
+batch_size: 4
+accum_iter: 1
+
+# absolute_lr = base_lr * total_batch_size / 256
+base_lr: 1e-3
+# lower lr bound for cyclic schedulers that hit 0
+min_lr: 0.0
+warmup_epochs: 5
+weight_decay: 0.05
+beta: [0.9, 0.95]
+clip_grad: 1.0
+# disable AMP by setting fp32 to true
+fp32: false
+
+# Datasets
+datasets:
+  hcp-train:
+    root: datasets/flat-clips/hcp-train-task-clips-16t
+    split_range: [0.0, 0.9]
+    shuffle: true
+
+  hcp-train-subset:
+    root: datasets/flat-clips/hcp-train-task-clips-16t
+    split_range: [0.0, 0.1]
+    shuffle: false
+
+  hcp-train-holdout:
+    root: datasets/flat-clips/hcp-train-task-clips-16t
+    split_range: [0.9, 1.0]
+    shuffle: false
+
+  hcp-val:
+    root: datasets/flat-clips/hcp-val-task-clips-16t
+    shuffle: false
+
+# Dataset names for special subsets.
+train_dataset_name: hcp-train
+val_dataset_name: hcp-train-holdout
+test_dataset_name: hcp-val
+
+# Number of target classes.
+num_classes: 21
+
+# Data transform
+# clip extreme values to [-vmax, vmax]. note that during flat dataset generation, each
+# vertex time series is z-scored for each run. so values should be in normal range.
+clip_vmax: 3.0
+
+# normalize each video clip.
+#   - global: the clip is globally normalized to mean zero unit variance.
+#   - frame: each temporal frame is independently normalized.
+# fMRI data have a lot of slow global variation (i.e. the "global signal"). z-scoring
+# each clip is one way to try to get the model to focus on more interesting local
+# activity variation.
+normalize: null
+
+# Data loader
+num_workers: 4
+
+checkpoint_period: 5
+max_checkpoints: 4
+
+wandb: true
+wandb_entity: null
+debug: false
+device: cuda
