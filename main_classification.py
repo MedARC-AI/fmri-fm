@@ -795,6 +795,24 @@ def pool_representations(
     return out
 
 
+class ImageFlatten(nn.Module):
+    def __init__(self, **kwargs):
+        super().__init__()
+
+    def forward_embedding(
+        self,
+        imgs: torch.Tensor,
+        img_mask: torch.Tensor | None = None,
+    ):
+        N, C, T, H, W = imgs.shape
+        assert C == 1
+        latent = imgs.reshape(N, T, H*W)  # [N, T, D]
+        return None, None, latent
+
+
+MODELS_DICT["image_flatten"] = ImageFlatten
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--cfg-path", type=str, default=None)
