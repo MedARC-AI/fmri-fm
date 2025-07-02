@@ -807,8 +807,8 @@ class ImageFlatten(nn.Module):
         N, C, T, H, W = imgs.shape
         assert C == 1
         latent = imgs.reshape(N, T, H*W)  # [N, T, D]
-        cls_token = latent.mean(dim=1)  # [N, D]
-        return cls_token, None, None
+        cls_token = latent.mean(dim=1, keepdim=True)  # [N, D]
+        return cls_token, None, latent
 
 
 MODELS_DICT["image_flatten"] = ImageFlatten
