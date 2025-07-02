@@ -77,6 +77,7 @@ def main(args: DictConfig):
             OmegaConf.save(args, out_cfg_path)
 
     device = torch.device(args.device)
+    torch.cuda.set_device(device)
 
     # fix the seed for reproducibility
     seed = args.seed + misc.get_rank()
@@ -170,6 +171,15 @@ def main(args: DictConfig):
         loss_scaler=loss_scaler,
     )
 
+    # watch middle classifiers on first epoch
+    # for later epochs will update to the best
+    mid_lr_scale = args.lr_scale_grid[len(args.lr_scale_grid) // 2]
+    mid_weight_decay = args.weight_decay_grid[len(args.weight_decay_grid) // 2]
+    log_classifier_keys = {
+        feature_source: (mid_lr_scale, mid_weight_decay)
+        for feature_source in args.representations
+    }
+
     checkpoint_path = ""
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
@@ -190,6 +200,7 @@ def main(args: DictConfig):
             fp32=args.fp32,
             num_batches=num_batches_train,
             log_wandb=args.wandb,
+            log_classifier_keys=log_classifier_keys,
         )
 
         eval_stats = {}
@@ -204,6 +215,7 @@ def main(args: DictConfig):
                 fp32=args.fp32,
                 num_batches=total_num_batches[dataset_name],
                 log_wandb=args.wandb,
+                log_classifier_keys=log_classifier_keys,
             )
             eval_stats[dataset_name] = ds_stats
 
@@ -233,12 +245,18 @@ def main(args: DictConfig):
             with (Path(args.output_dir) / "log.txt").open("a") as f:
                 print(json.dumps(log_stats), file=f)
 
+        best_scores, best_hparams = get_best_classifiers(
+            model_without_ddp, eval_stats[val_ds_name]
+        )
+
+        # log the best classifiers
+        log_classifier_keys = best_hparams
+        
+        print(f"Epoch: [{epoch}] Best validation scores:\n{json.dumps(best_scores)}")
+        print(f"Epoch: [{epoch}] Best validation hparams:\n{json.dumps(best_hparams)}")
+
         if args.debug:
             break
-
-    best_scores, best_hparams = get_best_classifiers(model, eval_stats[val_ds_name])
-    print(f"Best validation scores:\n{json.dumps(best_scores)}")
-    print(f"Best validation hparams:\n{json.dumps(best_hparams)}")
 
     best_classifiers = {
         (feature_source, hparam): classifiers[feature_source, hparam]
@@ -251,6 +269,8 @@ def main(args: DictConfig):
         to_save = {
             "model": best_model.state_dict(),
             "epoch": epoch,
+            "hparams": best_hparams,
+            "scores": best_scores,
             "args": OmegaConf.to_container(args),
         }
         misc.save_on_master(to_save, best_checkpoint_path)
@@ -273,7 +293,9 @@ def main(args: DictConfig):
             fp32=args.fp32,
             num_batches=num_batches_test,
             log_wandb=args.wandb,
+            log_classifier_keys=log_classifier_keys,
         )
+        print(f"Best models test stats:\n{json.dumps(test_stats)}")
 
         if args.output_dir and misc.is_main_process():
             with (Path(args.output_dir) / "test_log.txt").open("a") as f:
@@ -348,11 +370,12 @@ def get_embedding_shapes(
     loader: Iterable,
     device: torch.device
 ):
+    print("running backbone on example batch to get embedding shapes")
     example_batch = next(iter(loader))
     samples = example_batch["image"].to(device)
     img_mask = example_batch["mask"].to(device)
 
-    cls_token, object_tokens, patch_tokens = backbone.forward_embeddings(
+    cls_token, object_tokens, patch_tokens = backbone.forward_embedding(
         samples, img_mask=img_mask
     )
     backbone_out = pool_representations(
@@ -412,6 +435,7 @@ def train_one_epoch(
     fp32=False,
     num_batches=None,
     log_wandb=False,
+    log_classifier_keys=None,
 ):
     model.train(True)
     metric_logger = misc.MetricLogger(delimiter="  ")
@@ -423,6 +447,13 @@ def train_one_epoch(
     print_freq = 1 if args.debug else 20
     debug_steps = 10 * args.accum_iter
     log_wandb = misc.is_main_process() and log_wandb
+
+    model_without_ddp = model.module if args.distributed else model
+    classifier_keys = model_without_ddp.classifier_keys
+    clf_key_to_idx = {key: ii for ii, key in enumerate(classifier_keys)}
+
+    if log_classifier_keys is None:
+        log_classifier_keys = {}
 
     accum_iter = args.accum_iter
     if num_batches is None:
@@ -481,15 +512,12 @@ def train_one_epoch(
 
         torch.cuda.synchronize()
 
-        all_loss_dict = {
-            format_clf_key(key): all_loss_values[ii]
-            for ii, key in enumerate(model.classifiers)
+        metric_logger.update(loss=loss_value)
+        log_loss_dict = {
+            f"loss_{key[0]}": all_loss_values[clf_key_to_idx[key]]
+            for key in log_classifier_keys.items()
         }
-
-        metric_logger.update(
-            loss=loss_value,
-            **{f"loss__{k}": v for k, v in all_loss_dict.items()},
-        )
+        metric_logger.update(**log_loss_dict)
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)
         metric_logger.update(gpu_mem=misc.gpu_mem_usage())
@@ -506,7 +534,7 @@ def train_one_epoch(
             )
             log_stats = {
                 "train/loss": loss_value
-                **{f"train/loss/{k}": v for k, v in all_loss_dict.items()}
+                **{f"train/{k}": v for k, v in log_loss_dict.items()}
             }
             wandb.log(log_stats, step=epoch_1000x)
 
@@ -530,6 +558,7 @@ def evaluate(
     fp32=False,
     num_batches=None,
     log_wandb=False,
+    log_classifier_keys=None,
 ):
     model.eval()
     metric_logger = misc.MetricLogger(delimiter="  ")
@@ -537,6 +566,15 @@ def evaluate(
     print_freq = 1 if args.debug else 50
     debug_steps = 10
     log_wandb = misc.is_main_process() and log_wandb
+
+    model_without_ddp = model.module if args.distributed else model
+    classifier_keys = model_without_ddp.classifier_keys
+    clf_key_to_idx = {key: ii for ii, key in enumerate(classifier_keys)}
+
+    all_meters = defaultdict(misc.SmoothedValue)
+
+    if log_classifier_keys is None:
+        log_classifier_keys = {}
 
     if num_batches is None:
         num_batches = len(data_loader)
@@ -564,28 +602,35 @@ def evaluate(
             loss = all_loss.mean()
 
         loss_value = loss.item()
+        metric_logger.update(loss=loss_value)
+
         all_loss_values = all_loss.tolist()
+        all_acc1_values = [
+            accuracy(all_logit.detach()[..., ii], target)[0].item()
+            for ii in range(all_logit.shape[-1])
+        ]
 
-        all_loss_dict = {
-            format_clf_key(key): all_loss_values[ii]
-            for ii, key in enumerate(model.classifiers)
-        }
-        all_acc1_dict = {
-            format_clf_key(key): accuracy(all_logit[..., ii], target)[0].item()
-            for ii, key in enumerate(model.classifiers)
-        }
-
-        metric_logger.update(
-            loss=loss_value,
-            **{f"loss__{k}": v for k, v in all_loss_dict.items()},
-            **{f"acc1__{k}": v for k, v in all_acc1_dict.items()},
-        )
+        for ii, key in enumerate(classifier_keys):
+            fmt_key = format_clf_key(key)
+            all_meters[f"loss_{fmt_key}"].update(all_loss_values[ii])
+            all_meters[f"acc1_{fmt_key}"].update(all_acc1_values[ii])
+        
+        for feature_source, hparam in log_classifier_keys.items():
+            idx = clf_key_to_idx[(feature_source, hparam)]
+            metric_logger.update(
+                **{
+                    f"loss_{feature_source}": all_loss_values[idx],
+                    f"acc1_{feature_source}": all_acc1_values[idx],
+                }
+            )
 
         if args.debug and (data_iter_step + 1) >= debug_steps:
             break
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
+    for meter in all_meters.values():
+        meter.synchronize_between_processes()
     print(f"Averaged stats ({eval_name}):", metric_logger)
     stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
@@ -593,13 +638,15 @@ def evaluate(
         # eval at the end of training, so epoch + 1
         epoch_1000x = int((epoch + 1) * 1000)
         wandb.log({f"eval/{eval_name}/{k}": v for k, v in stats.items()}, step=epoch_1000x)
+    
+    stats.update({k: meter.global_avg for k, meter in all_meters.items()})
 
     return stats
 
 
 def format_clf_key(key: tuple[str, tuple[float, float]]) -> str:
     feature_source, (lr, weight_decay) = key
-    return f"{feature_source}-{lr:.1e}-{weight_decay:.1e}"
+    return f"{feature_source}_{lr:.1e}_{weight_decay:.1e}"
 
 
 def get_best_classifiers(
@@ -609,9 +656,9 @@ def get_best_classifiers(
 ):
     val_scores = defaultdict(list)
     clf_hparams = defaultdict(list)
-    for key in model.classifiers:
+    for key in model.classifier_keys:
         feature_source, hparam = key
-        score = val_stats[f"{metric}__{format_clf_key(key)}"]
+        score = val_stats[f"{metric}_{format_clf_key(key)}"]
         val_scores[feature_source].append(score)
         clf_hparams[feature_source].append(hparam)
 
@@ -631,7 +678,7 @@ class ClassificationWrapper(nn.Module):
     """
     Wrap a backbone embedding model together with a grid of classifier heads.
 
-    backbone: backbone model implementing forward_embeddings
+    backbone: backbone model implementing forward_embedding
     classifiers: map of (feature_source, (lr_scale, weight_decay)) -> classifier
     """
     def __init__(
@@ -642,21 +689,27 @@ class ClassificationWrapper(nn.Module):
         super().__init__()
         self.representations = {key[0] for key in classifiers}
         self.backbone = backbone
-        self.classifiers = nn.ModuleDict(classifiers)
+
+        # can't use ModuleDict bc of restrictions of keys (must be strings, no dots).
+        self.classifier_keys = list(classifiers)
+        self.classifiers = nn.ModuleList(list(classifiers.values()))
 
     def forward(self, *args, **kwargs) -> Tensor:
-        cls_token, object_tokens, patch_tokens = self.backbone.forward_embeddings(
+        cls_token, object_tokens, patch_tokens = self.backbone.forward_embedding(
             *args, **kwargs
         )
         backbone_out = pool_representations(
             cls_token, object_tokens, patch_tokens, self.representations
         )
-        all_logits = [
-            clf(backbone_out[key[0]]) for key, clf in self.classifiers.items()
-        ]
+
+        all_logit = []
+        for ii, (feature_source, _) in enumerate(self.classifier_keys):
+            clf = self.classifiers[ii]
+            all_logit.append(clf(backbone_out[feature_source]))
+
         # [B, num_classes, num_classifiers]
-        all_logits = torch.stack(all_logits, dim=-1)
-        return all_logits
+        all_logit = torch.stack(all_logit, dim=-1)
+        return all_logit
 
 
 class LinearClassifier(nn.Module):
@@ -728,7 +781,7 @@ def pool_representations(
         out["cls"] = cls_token  # [B, D]
     if "avg_patch" in representations:
         out["avg_patch"] = patch_tokens.mean(1)  # [B, D]
-    if "cls_avg_patch":
+    if "cls_avg_patch" in representations:
         out["cls_avg_patch"] = torch.cat([cls_token, patch_tokens.mean(1)], dim=-1)  # [B, 2 * D]
     if "avg_objects" in representations:
         out["avg_objects"] = object_tokens.mean(1)  # [B, D]
