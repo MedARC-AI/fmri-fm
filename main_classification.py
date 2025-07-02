@@ -795,9 +795,18 @@ def pool_representations(
     return out
 
 
-class ImageFlatten(nn.Module):
-    def __init__(self, **kwargs):
+class PCA(nn.Module):
+    def __init__(
+        self,
+        img_size: tuple[int, int],
+        embed_dim: int = 384,
+        **kwargs,
+    ):
         super().__init__()
+        self.img_size = img_size
+        self.embed_dim = embed_dim
+        H, W = img_size
+        self.linear = nn.Linear(H * W, embed_dim)
 
     def forward_embedding(
         self,
@@ -806,11 +815,12 @@ class ImageFlatten(nn.Module):
     ):
         N, C, T, H, W = imgs.shape
         assert C == 1
-        latent = imgs.reshape(N, T, H*W)  # [N, T, D]
+        latent = imgs.reshape(N, T, H * W)
+        latent = self.linear(latent)  # [N, T, D]
         return None, None, latent
 
 
-MODELS_DICT["image_flatten"] = ImageFlatten
+MODELS_DICT["pca"] = PCA
 
 
 if __name__ == "__main__":
