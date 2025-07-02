@@ -8,9 +8,7 @@
 # timm: https://github.com/rwightman/pytorch-image-models/tree/master/timm
 # DeiT: https://github.com/facebookresearch/deit
 # MAE: https://github.com/facebookresearch/mae
-#
-# Forked from MAE-st:
-# https://github.com/facebookresearch/mae_st
+# MAE-st: https://github.com/facebookresearch/mae_st
 # --------------------------------------------------------
 
 from functools import partial
@@ -128,7 +126,7 @@ class MaskedAutoencoderViT(nn.Module):
             if self.cls_embed:
                 self.decoder_pos_embed_class = nn.Parameter(
                     torch.zeros(1, 1, decoder_embed_dim)
-            )
+                )
         else:
             if self.cls_embed:
                 _num_patches = num_patches + 1
@@ -159,9 +157,6 @@ class MaskedAutoencoderViT(nn.Module):
             self.t_pred_patch_size * patch_size**2 * in_chans,
             bias=True,
         )
-
-        if init_decoder_scale:
-            self.decoder_scale = nn.Parameter(torch.ones(()) * init_decoder_scale)
 
         self.norm_pix_loss = norm_pix_loss
 
@@ -197,6 +192,11 @@ class MaskedAutoencoderViT(nn.Module):
 
         # initialize nn.Linear and nn.LayerNorm
         self.apply(self._init_weights)
+
+        # scale decoder head init to prevent hockey stick loss.
+        # init head with zero works, cf timm init_weights_vit_jax.
+        if self.init_decoder_scale is not None:
+            self.decoder_pred.weight.data.mul_(self.init_decoder_scale)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -374,9 +374,10 @@ class MaskedAutoencoderViT(nn.Module):
 
         # remove prefix tokens
         num_prefix_tokens = int(self.cls_embed) + self.reg_tokens
+        prefix = x[:, :num_prefix_tokens, :]
         x = x[:, num_prefix_tokens:, :]
 
-        return x, mask, ids_keep
+        return prefix, x, mask, ids_keep
 
     def forward_decoder(self, x, mask, ids_keep, decoder_mask_ratio, img_mask):
         # embed tokens to match embed dims
@@ -430,9 +431,6 @@ class MaskedAutoencoderViT(nn.Module):
 
         # predictor projection
         x = self.decoder_pred(x)
-
-        if self.init_decoder_scale:
-            x = self.decoder_scale * x
 
         if self.cls_embed:
             # remove cls token
@@ -505,7 +503,7 @@ class MaskedAutoencoderViT(nn.Module):
         if visible_mask is not None:
             visible_mask = visible_mask.expand_as(imgs)
 
-        latent, mask, ids_keep = self.forward_encoder(
+        prefix, latent, mask, ids_keep = self.forward_encoder(
             imgs, mask_ratio, visible_mask
         )
         pred, decoder_mask = self.forward_decoder(
@@ -513,6 +511,46 @@ class MaskedAutoencoderViT(nn.Module):
         )
         loss = self.forward_loss(imgs, pred, decoder_mask, img_mask)
         return loss, pred, mask, decoder_mask
+
+    def forward_embedding(
+        self,
+        imgs,
+        mask_ratio=0.0,
+        img_mask=None,
+        visible_mask=None,
+    ):
+        if visible_mask is None:
+            visible_mask = img_mask
+        elif img_mask is not None:
+            visible_mask = img_mask * visible_mask
+
+        if img_mask is not None:
+            img_mask = img_mask.expand_as(imgs)
+        if visible_mask is not None:
+            visible_mask = visible_mask.expand_as(imgs)
+
+        prefix, latent, mask, ids_keep = self.forward_encoder(
+            imgs, mask_ratio, visible_mask
+        )
+
+        N, _, C = latent.shape
+        T = self.patch_embed.t_grid_size
+        H, W = self.patch_embed.grid_size
+
+        zeros = torch.zeros(
+            N, T * H * W, C, dtype=latent.dtype, device=latent.device
+        )
+        latent = zeros.scatter(
+            dim=1,
+            index=ids_keep.unsqueeze(-1).expand(-1, -1, C),
+            src=latent,
+        )
+
+        cls_offset = int(self.cls_embed)
+        cls_token = prefix[:, :cls_offset]
+        reg_tokens = prefix[:, cls_offset:]
+
+        return cls_token, reg_tokens, latent
 
     @torch.no_grad()
     def forward_masked_recon(self, imgs, pred, mask, img_mask=None):
