@@ -190,8 +190,16 @@ def with_targets(
     """Webdataset filter to augment samples with targets."""
 
     if isinstance(target_id_map, (str, Path)):
-        with open(target_id_map) as f:
-            target_id_map = json.load(f)
+        target_id_map = Path(target_id_map)
+
+        if target_id_map.suffix == ".json":
+            with open(target_id_map) as f:
+                target_id_map = json.load(f)
+        elif target_id_map.suffix == ".npy":
+            target_id_map = np.load(target_id_map).tolist()
+            target_id_map = {ii: target for ii, target in enumerate(target_id_map)}
+        else:
+            raise ValueError(f"Unsupported target_id_map {target_id_map}.")
 
     def _filter(dataset: Iterable[dict[str, Any]]):
         for sample in dataset:

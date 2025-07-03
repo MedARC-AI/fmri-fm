@@ -16,11 +16,17 @@ DEFAULT_CONFIG = Path(__file__).parent / "config/default_extract_clips.yaml"
 
 def main(args: DictConfig):
     output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True)
-    OmegaConf.save(args, output_dir / "config.yaml")
 
-    for dataset_name, dataset_config in args.datasets.items():
+    include_datasets: list[str] = args.include_datasets or list(args.datasets)
+
+    for dataset_name in include_datasets:
+        dataset_config = args.datasets[dataset_name]
         print(f"dataset: {dataset_name}\n\n{OmegaConf.to_yaml(dataset_config)}")
+        
+        dataset_dir = output_dir / dataset_name
+        if dataset_dir.exists():
+            print(f"dataset output dir {dataset_dir} exists; skipping.")
+            continue
 
         random_seed(args.seed)
         dataset = make_flat_wds_dataset(**dataset_config, shuffle=False)
@@ -28,8 +34,8 @@ def main(args: DictConfig):
         loader = DataLoader(
             dataset, batch_size=None, shuffle=False, num_workers=cfg.num_workers
         )
-        dataset_dir = Path(output_dir / dataset_name)
-        dataset_dir.mkdir()
+        dataset_dir.mkdir(exist_ok=True, parents=True)
+        OmegaConf.save(args, dataset_dir / "config.yaml")
 
         for ii, sample in enumerate(tqdm(loader)):
             save_sample(ii, sample, dataset_dir)
