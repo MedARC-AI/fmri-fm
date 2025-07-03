@@ -314,7 +314,9 @@ def make_data_loaders(args: DictConfig):
     samplers = {}
     total_num_batches = {}
 
-    for dataset_name, dataset_config in args.datasets.items():
+    for dataset_config in args.datasets:
+        dataset_name = dataset_config.pop("name")
+
         print(f"dataset: {dataset_name}\n\n{OmegaConf.to_yaml(dataset_config)}")
 
         # only support pre-clipped datasets

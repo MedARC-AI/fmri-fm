@@ -104,24 +104,24 @@ fp32: false
 
 # Datasets
 datasets:
-  hcp-train:
-    root: datasets/flat-clips/hcp-train-task-clips-16t
-    split_range: [0.0, 0.9]
-    shuffle: true
+- name: hcp-train
+  root: datasets/flat-clips/hcp-train-task-clips-16t
+  split_range: [0.0, 0.9]
+  shuffle: true
 
-  hcp-train-subset:
-    root: datasets/flat-clips/hcp-train-task-clips-16t
-    split_range: [0.0, 0.1]
-    shuffle: false
+- name: hcp-train-subset
+  root: datasets/flat-clips/hcp-train-task-clips-16t
+  split_range: [0.0, 0.1]
+  shuffle: false
 
-  hcp-train-holdout:
-    root: datasets/flat-clips/hcp-train-task-clips-16t
-    split_range: [0.9, 1.0]
-    shuffle: false
+- name: hcp-train-holdout
+  root: datasets/flat-clips/hcp-train-task-clips-16t
+  split_range: [0.9, 1.0]
+  shuffle: false
 
-  hcp-val:
-    root: datasets/flat-clips/hcp-val-task-clips-16t
-    shuffle: false
+- name: hcp-val
+  root: datasets/flat-clips/hcp-val-task-clips-16t
+  shuffle: false
 
 # Dataset names for special subsets.
 train_dataset_name: hcp-train
