@@ -37,8 +37,5 @@ dependencies = [
     "webdataset",
 ]
 
-[tool.setuptools.packages.find]
-include = []
-
 [tool.setuptools_scm]
-version_file = "_version.py"
+version_file = "src/_version.py"
