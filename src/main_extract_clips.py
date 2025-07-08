@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from flat_data import make_flat_wds_dataset
 
-DEFAULT_CONFIG = Path(__file__).parent / "config/default_extract_clips.yaml"
+DEFAULT_CONFIG = Path(__file__).parents[1] / "config/default_extract_clips.yaml"
 
 
 def main(args: DictConfig):
