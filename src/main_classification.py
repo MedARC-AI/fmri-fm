@@ -26,15 +26,21 @@ import torch.backends.cudnn as cudnn
 import wandb
 from omegaconf import DictConfig, OmegaConf
 from timm.utils import accuracy
-from torch import Tensor
 from torch.utils.data import Subset
 from torch.utils.data.distributed import DistributedSampler
 from webdataset import WebLoader as DataLoader
 
 import models_mae
 import models_mae_linear
+import models_classification
 import util.lr_sched as lr_sched
 import util.misc as misc
+from models_classification import (
+    ClassificationWrapper,
+    AttnPoolClassifier,
+    LinearClassifier,
+    pool_representations,
+)
 from flat_data import FlatClipsDataset, make_flat_wds_dataset, make_flat_transform
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
@@ -42,7 +48,11 @@ PROJECT = "fMRI-foundation-model"
 
 DEFAULT_CONFIG = Path(__file__).parents[1] / "config/default_classification.yaml"
 
-MODELS_DICT = {**models_mae.__dict__, **models_mae_linear.__dict__}
+MODELS_DICT = {
+    **models_mae.__dict__,
+    **models_mae_linear.__dict__,
+    **models_classification.__dict__,
+}
 
 
 def main(args: DictConfig):
@@ -678,147 +688,6 @@ def get_best_classifiers(
         best_hparams[feature_source] = best_hparam
 
     return best_scores, best_hparams
-
-
-class ClassificationWrapper(nn.Module):
-    """
-    Wrap a backbone embedding model together with a grid of classifier heads.
-
-    backbone: backbone model implementing forward_embedding
-    classifiers: map of (feature_source, (lr_scale, weight_decay)) -> classifier
-    """
-    def __init__(
-        self,
-        backbone: nn.Module,
-        classifiers: dict[tuple[str, tuple[int, int]], nn.Module],
-    ):
-        super().__init__()
-        self.representations = {key[0] for key in classifiers}
-        self.backbone = backbone
-
-        # can't use ModuleDict bc of restrictions of keys (must be strings, no dots).
-        self.classifier_keys = list(classifiers)
-        self.classifiers = nn.ModuleList(list(classifiers.values()))
-
-    def forward(self, *args, **kwargs) -> Tensor:
-        cls_token, object_tokens, patch_tokens = self.backbone.forward_embedding(
-            *args, **kwargs
-        )
-        backbone_out = pool_representations(
-            cls_token, object_tokens, patch_tokens, self.representations
-        )
-
-        all_logit = []
-        for ii, (feature_source, _) in enumerate(self.classifier_keys):
-            clf = self.classifiers[ii]
-            all_logit.append(clf(backbone_out[feature_source]))
-
-        # [B, num_classes, num_classifiers]
-        all_logit = torch.stack(all_logit, dim=-1)
-        return all_logit
-
-
-class LinearClassifier(nn.Module):
-    def __init__(self, in_dim, out_dim):
-        super().__init__()
-        self.linear = nn.Linear(in_dim, out_dim)
-        self.init_weights()
-
-    def init_weights(self):
-        nn.init.trunc_normal_(self.linear.weight, std=0.02)
-        nn.init.zeros_(self.linear.bias)
-
-    def forward(self, cls_token):
-        return self.linear(cls_token)
-
-
-class AttnPoolClassifier(nn.Module):
-    def __init__(self, in_dim, out_dim):
-        super().__init__()
-        assert in_dim % 64 == 0
-        self.query_token = nn.Parameter(torch.empty(in_dim))
-        self.num_heads = in_dim // 64
-        self.kv = nn.Linear(in_dim, in_dim * 2)
-        self.linear = nn.Linear(in_dim, out_dim)
-        self.init_weights()
-
-    def init_weights(self):
-        nn.init.trunc_normal_(self.query_token, std=0.02)
-        nn.init.trunc_normal_(self.kv.weight, std=0.02)
-        nn.init.zeros_(self.kv.bias)
-        nn.init.trunc_normal_(self.linear.weight, std=0.02)
-        nn.init.zeros_(self.linear.bias)
-
-    def forward(self, feat_tokens):
-        B, N, D = feat_tokens.shape
-
-        q = self.query_token.expand(B, 1, -1)
-        q = q.reshape(B, 1, self.num_heads, D // self.num_heads)  # [B, 1, head, D_head]
-        q = q.permute(0, 2, 1, 3)  # [B, head, 1, D_head]
-
-        kv = self.kv(feat_tokens).reshape(B, N, 2, self.num_heads, D // self.num_heads)  # [B, N, 2, head, D_head]
-        kv = kv.permute(2, 0, 3, 1, 4)  # [2, B, head, N, D_head]
-        k, v = torch.unbind(kv, dim=0)  # 2 * [B, head, N, D_head]
-
-        x = F.scaled_dot_product_attention(q, k, v)  # [B, head, 1, D_head]
-        x = x.reshape(B, D)  # [B, D]
-        return self.linear(x)
-
-
-def pool_representations(
-    cls_token: Tensor | None,
-    object_tokens: Tensor | None,
-    patch_tokens: Tensor,
-    representations: list[str],
-):
-    B, N, D = patch_tokens.shape
-
-    if cls_token is not None:
-        assert cls_token.shape == (B, 1, D)
-        cls_token = cls_token.squeeze(1)
-
-    if object_tokens is not None:
-        R = object_tokens.shape[1]
-        assert object_tokens.shape == (B, R, D)
-
-    # Global features for the linear classifiers
-    out: dict[str, Tensor] = {}
-    if "cls" in representations:
-        out["cls"] = cls_token  # [B, D]
-    if "avg_patch" in representations:
-        out["avg_patch"] = patch_tokens.mean(1)  # [B, D]
-    if "cls_avg_patch" in representations:
-        out["cls_avg_patch"] = torch.cat([cls_token, patch_tokens.mean(1)], dim=-1)  # [B, 2 * D]
-    if "avg_objects" in representations:
-        out["avg_objects"] = object_tokens.mean(1)  # [B, D]
-    if "concat_objects" in representations:
-        out["concat_objects"] = object_tokens.flatten(1, 2)  # [B, R * D]
-    # Object features (registers) for the attention pooling classifiers
-    if "objects" in representations:
-        out["reg"] = object_tokens
-    # Patch features for the attention pooling classifiers
-    if "patch" in representations:
-        out["patch"] = patch_tokens  # [B, h * w, D]
-    return out
-
-
-class ImageFlatten(nn.Module):
-    def __init__(self, **kwargs):
-        super().__init__()
-
-    def forward_embedding(
-        self,
-        imgs: torch.Tensor,
-        img_mask: torch.Tensor | None = None,
-    ):
-        N, C, T, H, W = imgs.shape
-        assert C == 1
-        latent = imgs.reshape(N, T, H*W)  # [N, T, D]
-        cls_token = latent.mean(dim=1, keepdim=True)  # [N, D]
-        return cls_token, None, latent
-
-
-MODELS_DICT["image_flatten"] = ImageFlatten
 
 
 if __name__ == "__main__":
