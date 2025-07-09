@@ -1,3 +1,4 @@
+import fnmatch
 import inspect
 import json
 from functools import partial
@@ -19,9 +20,15 @@ def make_flat_wds_dataset(
     clipping_kwargs: dict[str, Any] | None = None,
     target_id_map: dict[str, int] | str | Path | None = None,
     target_key: str = "trial_type",
+    select_files_pattern: str | None = None,
     shuffle: bool = True,
 ) -> wds.WebDataset:
     """Make fMRI flat map dataset."""
+    if select_files_pattern:
+        select_files = make_select_files(select_files_pattern)
+    else:
+        select_files = None
+
     # resampling creates an infinite stream of shards sampled with replacement,
     # guaranteeing that no process runs out of data early in distributed training.
     # see webdataset FAQ: https://github.com/webdataset/webdataset/blob/main/FAQ.md
@@ -30,6 +37,7 @@ def make_flat_wds_dataset(
         resampled=shuffle,
         shardshuffle=False,
         nodesplitter=wds.split_by_node,
+        select_files=select_files,
     )
     dataset = dataset.decode().map(extract_flat_sample)
 
@@ -214,6 +222,12 @@ def load_target_id_map(target_id_map: Path) -> dict[Any, int]:
     else:
         raise ValueError(f"Unsupported target_id_map {target_id_map}.")
     return target_id_map
+
+
+def make_select_files(select_files_pattern: str) -> Callable[[str], bool]:
+    def _filter(fname: str):
+        return fnmatch.fnmatch(fname, select_files_pattern)
+    return _filter
 
 
 def make_flat_transform(

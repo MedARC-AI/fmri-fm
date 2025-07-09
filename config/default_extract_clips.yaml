@@ -51,5 +51,19 @@ datasets:
     target_id_map: datasets/nsd_coco_73k_semantic_cluster_ids.npy
     target_key: nsd_id
 
+  hcp-train-rest-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{0000..1799}.tar
+    clipping: random 
+    clipping_kwargs:
+      oversample: 0.33
+    select_files_pattern: "*mod-rfMRI*"
+
+  hcp-val-rest-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{1800..1899}.tar
+    clipping: random 
+    clipping_kwargs:
+      oversample: 0.33
+    select_files_pattern: "*mod-rfMRI*"
+
 # By default generate all datasets.
 include_datasets: null
