@@ -25,6 +25,7 @@ _version.py
 datasets
 checkpoints
 wandb
+jobs
 
 # Local scratch/tmp
 .scratch
