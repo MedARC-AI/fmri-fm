@@ -190,16 +190,7 @@ def with_targets(
     """Webdataset filter to augment samples with targets."""
 
     if isinstance(target_id_map, (str, Path)):
-        target_id_map = Path(target_id_map)
-
-        if target_id_map.suffix == ".json":
-            with open(target_id_map) as f:
-                target_id_map = json.load(f)
-        elif target_id_map.suffix == ".npy":
-            target_id_map = np.load(target_id_map).tolist()
-            target_id_map = {ii: target for ii, target in enumerate(target_id_map)}
-        else:
-            raise ValueError(f"Unsupported target_id_map {target_id_map}.")
+        target_id_map = load_target_id_map(target_id_map)
 
     def _filter(dataset: Iterable[dict[str, Any]]):
         for sample in dataset:
@@ -212,11 +203,26 @@ def with_targets(
     return _filter
 
 
+def load_target_id_map(target_id_map: Path) -> dict[Any, int]:
+    target_id_map = Path(target_id_map)
+    if target_id_map.suffix == ".json":
+        with open(target_id_map) as f:
+            target_id_map = json.load(f)
+    elif target_id_map.suffix == ".npy":
+        target_id_map = np.load(target_id_map).tolist()
+        target_id_map = {ii: target for ii, target in enumerate(target_id_map)}
+    else:
+        raise ValueError(f"Unsupported target_id_map {target_id_map}.")
+    return target_id_map
+
+
 def make_flat_transform(
     clip_vmax: float | None = 3.0,
     normalize: Literal["global", "frame"] | None = None,
     masking: str | None = None,
     masking_kwargs: dict[str, Any] | None = None,
+    target_id_map: dict[str, int] | str | Path | None = None,
+    target_key: str | None = None,
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
     """Make sample transform for flat map data.
 
@@ -235,6 +241,10 @@ def make_flat_transform(
         norm_fn = partial(apply_normalize, dim=norm_dim)
     else:
         norm_fn = None
+
+    if target_id_map is not None:
+        if isinstance(target_id_map, (str, Path)):
+            target_id_map = load_target_id_map(target_id_map)
 
     def transform(sample: dict[str, Any]):
         # (T, H, W)
@@ -269,6 +279,10 @@ def make_flat_transform(
         sample = {**sample, "image": image, "mask": mask}
         if visible_mask is not None:
             sample["visible_mask"] = visible_mask
+
+        if target_id_map is not None:
+            sample["target"] = target_id_map[sample[target_key]]
+
         return sample
 
     return transform

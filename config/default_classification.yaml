@@ -123,6 +123,10 @@ datasets:
   root: datasets/flat-clips/hcp-val-task-clips-16t
   shuffle: false
 
+# Target ID map, if not already in the samples.
+target_id_map: null
+target_key: null
+
 # Dataset names for special subsets.
 train_dataset_name: hcp-train
 val_dataset_name: hcp-train-holdout

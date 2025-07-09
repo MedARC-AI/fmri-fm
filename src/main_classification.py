@@ -250,7 +250,7 @@ def main(args: DictConfig):
 
         # log the best classifiers
         log_classifier_keys = best_hparams
-        
+
         print(f"Epoch: [{epoch}] Best validation scores:\n{json.dumps(best_scores)}")
         print(f"Epoch: [{epoch}] Best validation hparams:\n{json.dumps(best_hparams)}")
 
@@ -308,11 +308,16 @@ def main(args: DictConfig):
 
 
 def make_data_loaders(args: DictConfig):
-    transform = make_flat_transform(clip_vmax=args.clip_vmax, normalize=args.normalize)
-
     data_loaders = {}
     samplers = {}
     total_num_batches = {}
+
+    transform = make_flat_transform(
+        clip_vmax=args.clip_vmax,
+        normalize=args.normalize,
+        target_id_map=args.target_id_map,
+        target_key=args.target_key,
+    )
 
     for dataset_config in args.datasets:
         dataset_name = dataset_config.pop("name")
@@ -615,7 +620,7 @@ def evaluate(
             fmt_key = format_clf_key(key)
             all_meters[f"loss_{fmt_key}"].update(all_loss_values[ii])
             all_meters[f"acc1_{fmt_key}"].update(all_acc1_values[ii])
-        
+
         for feature_source, hparam in log_classifier_keys.items():
             idx = clf_key_to_idx[(feature_source, hparam)]
             metric_logger.update(
@@ -639,7 +644,7 @@ def evaluate(
         # eval at the end of training, so epoch + 1
         epoch_1000x = int((epoch + 1) * 1000)
         wandb.log({f"eval/{eval_name}/{k}": v for k, v in stats.items()}, step=epoch_1000x)
-    
+
     stats.update({k: meter.global_avg for k, meter in all_meters.items()})
 
     return stats
