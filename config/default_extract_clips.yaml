@@ -65,5 +65,19 @@ datasets:
       oversample: 0.33
     select_files_pattern: "*mod-rfMRI*"
 
+  hcp-train-rest1-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{0000..1799}.tar
+    clipping: random 
+    clipping_kwargs:
+      oversample: 0.66
+    select_files_pattern: "*task-REST1*"
+  
+  hcp-train-rest2-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{0000..1799}.tar
+    clipping: random 
+    clipping_kwargs:
+      oversample: 0.66
+    select_files_pattern: "*task-REST2*"
+
 # By default generate all datasets.
 include_datasets: null
