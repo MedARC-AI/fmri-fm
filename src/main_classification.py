@@ -419,7 +419,12 @@ def make_classifiers(
         if len(embed_shape) == 1:
             clf_fn = partial(LinearClassifier, embed_shape[-1], args.num_classes)
         else:
-            clf_fn = partial(AttnPoolClassifier, embed_shape[-1], args.num_classes)
+            clf_fn = partial(
+                AttnPoolClassifier,
+                embed_shape[-1],
+                args.num_classes,
+                embed_dim=args.get("attn_pool_embed_dim"),
+            )
 
         for lr_scale, weight_decay in product(args.lr_scale_grid, args.weight_decay_grid):
             # TODO: should they all get the same init?

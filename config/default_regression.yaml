@@ -73,12 +73,18 @@ cls_embed: true
 
 init_decoder_scale: null
 
+# Baseline model settings
+parcellation_path: datasets/Schaefer2018_400Parcels_7Networks_order.flat.npy
+
 # Classifier settings
 # Classifier input pooled embeddings.
 representations:
 - cls
 - avg_patch
 - patch
+
+# Intermediate embed dim for attentive probe
+attn_pool_embed_dim: null
 
 # Grid of learning rate scale factors and weight decays for linear classifiers.
 # Copied from CAPI.

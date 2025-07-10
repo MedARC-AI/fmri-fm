@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from timm.layers import to_2tuple
 
 
 class ClassificationWrapper(nn.Module):
@@ -60,13 +61,15 @@ class LinearClassifier(nn.Module):
 
 
 class AttnPoolClassifier(nn.Module):
-    def __init__(self, in_dim, out_dim):
+    def __init__(self, in_dim, out_dim, embed_dim=None):
         super().__init__()
-        assert in_dim % 64 == 0
-        self.query_token = nn.Parameter(torch.empty(in_dim))
-        self.num_heads = in_dim // 64
-        self.kv = nn.Linear(in_dim, in_dim * 2)
-        self.linear = nn.Linear(in_dim, out_dim)
+        embed_dim = embed_dim or in_dim
+        assert embed_dim % 64 == 0
+        self.query_token = nn.Parameter(torch.empty(embed_dim))
+        self.embed_dim = embed_dim
+        self.num_heads = embed_dim // 64
+        self.kv = nn.Linear(in_dim, embed_dim * 2)
+        self.linear = nn.Linear(embed_dim, out_dim)
         self.init_weights()
 
     def init_weights(self):
@@ -77,7 +80,8 @@ class AttnPoolClassifier(nn.Module):
         nn.init.zeros_(self.linear.bias)
 
     def forward(self, feat_tokens):
-        B, N, D = feat_tokens.shape
+        B, N, _ = feat_tokens.shape
+        D = self.embed_dim
 
         q = self.query_token.expand(B, 1, -1)
         q = q.reshape(B, 1, self.num_heads, D // self.num_heads)  # [B, 1, head, D_head]
@@ -101,7 +105,8 @@ def pool_representations(
     B, N, D = patch_tokens.shape
 
     if cls_token is not None:
-        assert cls_token.shape == (B, 1, D)
+        # nb, for connectome baseline the "cls_token" is a different shape. hack.
+        assert cls_token.shape == (B, 1, cls_token.shape[-1])
         cls_token = cls_token.squeeze(1)
 
     if object_tokens is not None:
@@ -129,6 +134,103 @@ def pool_representations(
     return out
 
 
+class Connectome(nn.Module):
+    parc_weight: Tensor
+
+    def __init__(
+        self,
+        parcellation_path: str | Path,
+        eps: float = 1e-6,
+        **kwargs,
+    ):
+        super().__init__()
+        self.eps = eps
+        parc_weight = load_parcellation(parcellation_path)
+        self.register_buffer("parc_weight", parc_weight)
+
+    def forward_embedding(
+        self,
+        imgs: torch.Tensor,
+        img_mask: torch.Tensor | None = None,
+    ):
+        N, C, T, H, W = imgs.shape
+        assert C == 1
+        latent = imgs.reshape(N, T, H*W)  # [N, T, D]
+
+        # roi averaging
+        latent = latent @ self.parc_weight.t()  # [N, T, R]
+
+        # normalize to mean zero, unit norm
+        x = latent
+        x = x - x.mean(dim=1, keepdim=True)
+        x = x / (torch.norm(x, dim=1, keepdim=True) + self.eps)
+
+        # R x R pearson connectome
+        conn = x.transpose(1, 2) @ x  # [N, R, R]
+
+        # flatten upper triangle
+        R = conn.shape[1]
+        row, col = torch.unbind(torch.triu_indices(R, R, offset=1, device=x.device))
+        conn = conn[:, row, col]  # [N, R*(R-1)/2]
+
+        cls_token = conn[:, None, :]
+
+        return cls_token, None, latent
+
+
+def load_parcellation(parcellation_path: str | Path) -> Tensor:
+    # parcellation is shape (H, W), with values in [0, n_rois]
+    # 0 is background
+    parc = np.load(parcellation_path)
+    parc = parc.flatten()
+
+    # make one hot encoding, (n_rois, n_vertices)
+    n_rois = parc.max()
+    parc_one_hot = np.arange(1, n_rois + 1)[:, None] == parc
+
+    # normalize to sum to one for roi averaging
+    parc_weight = parc_one_hot / np.sum(parc_one_hot, axis=1, keepdims=True)
+
+    # to tensor
+    parc_weight = torch.from_numpy(parc_weight).float()
+    return parc_weight
+
+
+class PCA(nn.Module):
+    def __init__(
+        self,
+        img_size: int | tuple[int, int] = 224,
+        num_frames: int = 16,
+        embed_dim: int = 768,
+        **kwargs,
+    ):
+        super().__init__()
+        self.img_size = to_2tuple(img_size)
+        self.num_frames = num_frames
+        self.embed_dim = embed_dim
+
+        H, W = self.img_size
+        self.spatial_linear = nn.Linear(H*W, embed_dim)
+        self.temporal_linear = nn.Linear(num_frames, embed_dim, bias=False)
+
+    def forward_embedding(
+        self,
+        imgs: torch.Tensor,
+        img_mask: torch.Tensor | None = None,
+    ):
+        N, C, T, H, W = imgs.shape
+        assert C == 1
+        latent = imgs.reshape(N, T, H*W)  # [N, T, D]
+
+        # spatial projection
+        latent = self.spatial_linear(latent)  # [N, T, d]
+        # temporal projection
+        cls_token = torch.einsum("ntd,dt->nd", latent, self.temporal_linear.weight)
+        # unsqueeze
+        cls_token = cls_token[:, None, :]  # [N, 1, d]
+        return cls_token, None, latent
+
+
 class ImageFlatten(nn.Module):
     def __init__(self, **kwargs):
         super().__init__()
@@ -143,6 +245,18 @@ class ImageFlatten(nn.Module):
         latent = imgs.reshape(N, T, H*W)  # [N, T, D]
         cls_token = latent.mean(dim=1, keepdim=True)  # [N, D]
         return cls_token, None, latent
+
+
+def connectome(**kwargs):
+    return Connectome(**kwargs)
+
+
+def pca_small(**kwargs):
+    return PCA(embed_dim=384, **kwargs)
+
+
+def pca_base(**kwargs):
+    return PCA(embed_dim=768, **kwargs)
 
 
 def image_flatten(**kwargs):
