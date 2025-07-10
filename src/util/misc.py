@@ -47,7 +47,7 @@ class SmoothedValue:
         self.fmt = fmt
 
     def update(self, value, n=1):
-        self.deque.append(value)
+        self.deque.append(float(value))
         self.count += n
         self.total += value * n
 
@@ -105,7 +105,7 @@ class MetricLogger:
         for k, v in kwargs.items():
             if v is None:
                 continue
-            if isinstance(v, torch.Tensor):
+            if isinstance(v, (torch.Tensor, np.generic)):
                 v = v.item()
             assert isinstance(v, (float, int))
             self.meters[k].update(v)

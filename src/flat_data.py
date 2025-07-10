@@ -295,7 +295,10 @@ def make_flat_transform(
             sample["visible_mask"] = visible_mask
 
         if target_id_map is not None:
-            sample["target"] = target_id_map[sample[target_key]]
+            target = target_id_map[sample[target_key]]
+            if isinstance(target, list):
+                target = torch.as_tensor(target).float()
+            sample["target"] = target
 
         return sample
 
