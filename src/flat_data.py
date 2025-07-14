@@ -22,6 +22,7 @@ def make_flat_wds_dataset(
     target_key: str = "trial_type",
     select_files_pattern: str | None = None,
     shuffle: bool = True,
+    buffer_size: int = 1000,
 ) -> wds.WebDataset:
     """Make fMRI flat map dataset."""
     if select_files_pattern:
@@ -51,7 +52,7 @@ def make_flat_wds_dataset(
         dataset = dataset.compose(with_targets(target_id_map, target_key=target_key))
 
     if shuffle:
-        dataset = dataset.shuffle(1000)
+        dataset = dataset.shuffle(buffer_size)
     return dataset
 
 
