@@ -44,7 +44,7 @@ def train_one_epoch(
         "gpu_mem", misc.SmoothedValue(window_size=1, fmt="{value:.6f}")
     )
     header = "Train: Epoch: [{}]".format(epoch)
-    print_freq = 1 if args.debug else 20
+    print_freq = 1 if args.debug else 100
     debug_steps = 10 * args.accum_iter
     log_wandb = misc.is_main_process() and log_wandb
 
