@@ -633,7 +633,7 @@ dependencies = [
 requires-dist = [
     { name = "datasets" },
     { name = "einops" },
-    { name = "fvcore", specifier = ">=0.1.5.post20221221" },
+    { name = "fvcore" },
     { name = "huggingface-hub" },
     { name = "iopath" },
     { name = "ipython" },
