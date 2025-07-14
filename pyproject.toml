@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
     "datasets",
     "einops",
+    "fvcore",
     "huggingface_hub",
     "iopath",
     "ipython",
