@@ -72,13 +72,14 @@ class PatchEmbed(nn.Module):
         ), f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
         assert T == self.frames
         if mask is not None:
+            mask = (mask > 0).float()
             x = mask * x
         x = self.proj(x).flatten(3)
         x = torch.einsum("ncts->ntsc", x)  # [N, T, H*W, C]
 
         # re-scale for missing pixels
         if mask is not None:
-            mask_patches: torch.Tensor = rearrange(
+            mask_patches = rearrange(
                 mask,
                 "b c (t u) (h p) (w q) -> b t (h w) (u p q c)",
                 t=self.t_grid_size,

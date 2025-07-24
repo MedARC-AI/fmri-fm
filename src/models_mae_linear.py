@@ -21,6 +21,7 @@ class MaskedLinear(nn.Linear):
         mask: [..., D], 1 = observed, 0 = unobserved
         """
         if mask is not None:
+            mask = (mask > 0).float()
             input = input * mask
         output = F.linear(input, self.weight, self.bias)
         if mask is not None:

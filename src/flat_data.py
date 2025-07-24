@@ -287,7 +287,7 @@ def make_flat_transform(
 
         # (C, T, H, W)
         image = image[None]
-        mask = mask[None, None]
+        mask = mask[None, None].float()
         if visible_mask is not None:
             visible_mask = visible_mask[None, None]
 
