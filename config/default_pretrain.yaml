@@ -65,7 +65,12 @@ decoder_depth: 4
 sep_pos_embed: true
 cls_embed: true
 
+# initial weight scale for the decoder head. initializing with small scale can help
+# avoid the hockey stick loss.
 init_decoder_scale: null
+
+# correct for the number of observed pixels in the patch embedding
+mask_patch_embed: false
 
 # Optimization
 epochs: 100
