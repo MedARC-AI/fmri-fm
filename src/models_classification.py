@@ -7,6 +7,8 @@ import torch.nn.functional as F
 from torch import Tensor
 from timm.layers import to_2tuple
 
+from util import video_vit
+
 
 class ClassificationWrapper(nn.Module):
     """
@@ -134,6 +136,95 @@ def pool_representations(
     return out
 
 
+class PatchEmbed(nn.Module):
+    def __init__(
+        self,
+        img_size=224,
+        patch_size=16,
+        in_chans=3,
+        embed_dim=1024,
+        num_frames=16,
+        t_patch_size=4,
+        patch_embed=video_vit.PatchEmbed,
+        sep_pos_embed=False,
+        trunc_init=False,
+        mask_patch_embed=False,
+        **kwargs,
+    ):
+        super().__init__()
+        self.sep_pos_embed = sep_pos_embed
+        self.trunc_init = trunc_init
+        self.mask_patch_embed = mask_patch_embed
+
+        self.patch_embed = patch_embed(
+            img_size,
+            patch_size,
+            in_chans,
+            embed_dim,
+            num_frames,
+            t_patch_size,
+        )
+        num_patches = self.patch_embed.num_patches
+        input_size = self.patch_embed.input_size
+        self.input_size = input_size
+
+        if sep_pos_embed:
+            self.pos_embed_spatial = nn.Parameter(
+                torch.zeros(1, input_size[1] * input_size[2], embed_dim)
+            )
+            self.pos_embed_temporal = nn.Parameter(
+                torch.zeros(1, input_size[0], embed_dim)
+            )
+        else:
+            self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
+
+        self.initialize_weights()
+
+    def initialize_weights(self):
+        if self.sep_pos_embed:
+            torch.nn.init.trunc_normal_(self.pos_embed_spatial, std=0.02)
+            torch.nn.init.trunc_normal_(self.pos_embed_temporal, std=0.02)
+        else:
+            torch.nn.init.trunc_normal_(self.pos_embed, std=0.02)
+            torch.nn.init.trunc_normal_(self.decoder_pos_embed, std=0.02)
+        w = self.patch_embed.proj.weight.data
+        if self.trunc_init:
+            torch.nn.init.trunc_normal_(w)
+        else:
+            torch.nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
+        
+    def forward(
+        self,
+        imgs: torch.Tensor,
+        img_mask: torch.Tensor | None = None,
+    ):
+        # imgs: [N, C, T, H, W]
+        # x: [N, L, C]
+        if img_mask is not None:
+            img_mask = img_mask.expand_as(imgs)
+        imgs = img_mask * imgs
+
+        x = self.patch_embed(imgs, mask=img_mask if self.mask_patch_embed else None)
+        N, T, L, C = x.shape
+        x = x.reshape(N, T * L, C)
+
+        if self.sep_pos_embed:
+            pos_embed = self.pos_embed_temporal[:, :, None] + self.pos_embed_spatial[:, None, :]
+            pos_embed = pos_embed.flatten(1, 2)
+        else:
+            pos_embed = self.pos_embed
+        x = x + pos_embed
+        return x
+    
+    def forward_embedding(
+        self,
+        imgs: torch.Tensor,
+        img_mask: torch.Tensor | None = None,
+    ):
+        x = self.forward(imgs, img_mask)  # [N, L, C]
+        return None, None, x
+
+
 class Connectome(nn.Module):
     parc_weight: Tensor
 
@@ -245,6 +336,14 @@ class ImageFlatten(nn.Module):
         latent = imgs.reshape(N, T, H*W)  # [N, T, D]
         cls_token = latent.mean(dim=1, keepdim=True)  # [N, D]
         return cls_token, None, latent
+
+
+def patch_embed_small(**kwargs):
+    return PatchEmbed(embed_dim=384, **kwargs)
+
+
+def patch_embed_base(**kwargs):
+    return PatchEmbed(embed_dim=768, **kwargs)
 
 
 def connectome(**kwargs):
