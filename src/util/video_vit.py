@@ -6,8 +6,11 @@ import util.logging as logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange
 from timm.layers import to_2tuple
 from timm.models.vision_transformer import DropPath, Mlp
+
+EPS = 1e-6
 
 
 logger = logging.get_logger(__name__)
@@ -62,14 +65,34 @@ class PatchEmbed(nn.Module):
             in_chans, embed_dim, kernel_size=kernel_size, stride=kernel_size
         )
 
-    def forward(self, x):
+    def forward(self, x, mask=None):
         B, C, T, H, W = x.shape
         assert (
             H == self.img_size[0] and W == self.img_size[1]
         ), f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
         assert T == self.frames
+        if mask is not None:
+            x = mask * x
         x = self.proj(x).flatten(3)
         x = torch.einsum("ncts->ntsc", x)  # [N, T, H*W, C]
+
+        # re-scale for missing pixels
+        if mask is not None:
+            mask_patches: torch.Tensor = rearrange(
+                mask,
+                "b c (t u) (h p) (w q) -> b t (h w) (u p q c)",
+                t=self.t_grid_size,
+                h=self.grid_size[0],
+                w=self.grid_size[1],
+                u=self.t_patch_size,
+                p=self.patch_size[0],
+                q=self.patch_size[1],
+            )  # [N, T, H*W, C]
+
+            obs_rate = mask_patches.mean(dim=-1, keepdim=True)  # [N, T, H*W, 1]
+            x = x - self.proj.bias
+            x = (obs_rate > 0) * x / (obs_rate + EPS)
+            x = x + self.proj.bias
         return x
 
 

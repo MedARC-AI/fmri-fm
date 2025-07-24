@@ -115,3 +115,14 @@ def test_mae_sparse_decode():
     # check that decoder mask is subset of original mask
     assert (decoder_mask * (1 - mask)).sum() == 0
     assert decoder_mask.sum() < mask.sum()
+
+
+def test_mae_masked_patch_embed():
+    T, H, W = 16, 224, 224
+    x = torch.randn(2, 3, T, H, W)
+    img_mask = torch.zeros(H, W)
+    img_mask[18: H - 18, 18: W - 18] = 1
+
+    model = mae_vit_tiny_patch16(mask_patch_embed=True)
+    loss, pred, mask, decoder_mask = model.forward(x, img_mask=img_mask)
+    assert not torch.isnan(loss)

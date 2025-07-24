@@ -20,11 +20,14 @@ class MaskedLinear(nn.Linear):
         input: [..., D]
         mask: [..., D], 1 = observed, 0 = unobserved
         """
-        input = input * mask
+        if mask is not None:
+            input = input * mask
         output = F.linear(input, self.weight, self.bias)
         if mask is not None:
             obs_rate = mask.mean(dim=-1, keepdim=True)
-            output = output / (obs_rate + EPS)
+            output = output - self.bias
+            output = (obs_rate > 0) * output / (obs_rate + EPS)
+            output = output + self.bias
         return output
 
 

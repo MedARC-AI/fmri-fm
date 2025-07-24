@@ -47,6 +47,7 @@ class MaskedAutoencoderViT(nn.Module):
         reg_tokens=0,
         no_cls_pos=False,
         init_decoder_scale=None,
+        mask_patch_embed=False,
         **kwargs,
     ):
         super().__init__()
@@ -57,6 +58,7 @@ class MaskedAutoencoderViT(nn.Module):
         self.no_cls_pos = no_cls_pos
         self.init_decoder_scale = init_decoder_scale
         self.t_pred_patch_size = t_pred_patch_size
+        self.mask_patch_embed = mask_patch_embed
         assert t_patch_size % t_pred_patch_size == 0
 
         self.patch_embed = patch_embed(
@@ -358,7 +360,7 @@ class MaskedAutoencoderViT(nn.Module):
             visible_patch_mask = None
 
         # embed patches
-        x = self.patch_embed(x)
+        x = self.patch_embed(x, mask=visible_mask if self.mask_patch_embed else None)
         N, T, L, C = x.shape
 
         x = x.reshape(N, T * L, C)
