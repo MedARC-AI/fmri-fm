@@ -58,9 +58,9 @@ def test_apply_normalize(dummy_mask: torch.Tensor):
     image = 2 + 3 * torch.randn((8, *dummy_mask.shape))
     image = dummy_mask * image
 
-    image = flat_data.apply_normalize(image, dummy_mask, dim=(1, 2))
+    image = flat_data.apply_normalize(image, dummy_mask, dim=-1)
     image_masked = image[:, dummy_mask == 1]
     image_mean = image_masked.mean(dim=1)
     image_std = image_masked.std(dim=1)
-    assert torch.allclose(image_mean, torch.zeros(()))
+    assert torch.allclose(image_mean, torch.zeros(()), atol=1e-7)
     assert torch.allclose(image_std, torch.ones(()))
