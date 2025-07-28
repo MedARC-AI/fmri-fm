@@ -192,7 +192,7 @@ class PatchEmbed(nn.Module):
             torch.nn.init.trunc_normal_(w)
         else:
             torch.nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
-        
+
     def forward(
         self,
         imgs: torch.Tensor,
@@ -215,7 +215,7 @@ class PatchEmbed(nn.Module):
             pos_embed = self.pos_embed
         x = x + pos_embed
         return x
-    
+
     def forward_embedding(
         self,
         imgs: torch.Tensor,

@@ -538,7 +538,7 @@ def train_one_epoch(
         torch.cuda.synchronize()
 
         metric_logger.update(loss=loss_value)
-        
+
         log_loss_dict = {
             f"loss_{key[0]}": mean_loss_values[clf_key_to_idx[key]]
             for key in log_classifier_keys.items()

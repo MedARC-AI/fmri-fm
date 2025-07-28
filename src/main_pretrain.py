@@ -96,7 +96,7 @@ def main(args: DictConfig):
 
     model_without_ddp = model
     print("Model = %s" % str(model_without_ddp))
-    
+
     num_params = sum(p.numel() for p in model_without_ddp.parameters())
     print(f"Num params = {num_params / 1e6:.1f}M")
 
