@@ -1,6 +1,6 @@
 # Contributing guide
 
-[[**#fmri-fm**](https://discord.com/channels/1025299671226265621/1399064456662880257)] [[Issues](issues/)] [[Pull requests](pulls/)] [[Forks](forks/)]
+[[**#fmri-fm**](https://discord.com/channels/1025299671226265621/1399064456662880257)] [[Issues](https://github.com/SophontAI/fmri-fm/issues/)] [[Pull requests](https://github.com/SophontAI/fmri-fm/pulls/)] [[Forks](https://github.com/SophontAI/fmri-fm/forks/)]
 
 This is a community-driven open science project. We welcome all contributions, and we want contributing to be as easy as possible.
 
@@ -10,18 +10,18 @@ The [#fmri-fm](https://discord.com/channels/1025299671226265621/1399064456662880
 
 ## Forks
 
-All contributions to the project should be made through a personal [fork](forks/) of the main project repo. You can fork the repo [here](fork/) to get started. See [here](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/getting-started/about-collaborative-development-models#fork-and-pull-model) for background on the "fork-and-pull" development model.
+All contributions to the project should be made through a personal [fork](forks/) of the main project repo. You can fork the repo [here](https://github.com/SophontAI/fmri-fm/fork/) to get started. See [here](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/getting-started/about-collaborative-development-models#fork-and-pull-model) for background on the "fork-and-pull" development model.
 
 ## Issues
 
-We use GitHub issues to track open project directions. See our [issue list](issues/) for directions that are currently being worked on. If you're interested in working on an issue, you should comment in the issue thread, and then also message the channel on Discord saying that you're interested.
+We use GitHub issues to track open project directions. See our [issue list](https://github.com/SophontAI/fmri-fm/issues/) for directions that are currently being worked on. If you're interested in working on an issue, you should comment in the issue thread, and then also message the channel on Discord saying that you're interested.
 
 If no one is currently working on the issue, you're welcome to just get started on it. There's no need to get approval. Just message in the channel saying what you're planning on doing.
 If there are already people working on the issue, you're still welcome to help out. (In fact, it's often good to work together with someone more established in the project if it's your first contribution.) Just message in the channel to figure out how you can contribute.
 
 ## Pull requests
 
-All contributions should be made as pull requests from your personal fork back to the main project repo. See previous [closed PRs](pulls?q=is%3Apr+is%3Aclosed) for examples on what yours should look like.
+All contributions should be made as pull requests from your personal fork back to the main project repo. See previous [closed PRs](https://github.com/SophontAI/fmri-fm/pulls?q=is%3Apr+is%3Aclosed) for examples on what yours should look like.
 
 The basic workflow is:
 
