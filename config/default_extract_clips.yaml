@@ -1,0 +1,83 @@
+num_frames: 16
+output_dir: datasets/flat-clips
+seed: 7293
+num_workers: 4
+
+datasets:
+  hcp-train-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{0000..0009}.tar
+    clipping: random
+
+  hcp-val-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{1800..1809}.tar
+    clipping: random
+
+  nsd-subj01-clips-16t:
+    url: datasets/nsd-flat/nsd-flat_{0000..0009}.tar
+    clipping: random
+
+  hcp-train-task-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{0000..1799}.tar
+    clipping: event
+    target_id_map: datasets/hcp_trial_type_target_id_map.json
+
+  hcp-val-task-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{1800..1899}.tar
+    clipping: event
+    target_id_map: datasets/hcp_trial_type_target_id_map.json
+
+  # NSD shard ranges for each subject:
+  #
+  #   subj01 0000..0039
+  #   subj02 0040..0079
+  #   subj03 0080..0111
+  #   subj04 0112..0141
+  #   subj05 0142..0181
+  #   subj06 0182..0213
+  #   subj07 0214..0253
+  #   subj08 0254..0283
+
+  # Subjects 1-3
+  nsd-train-task-clips-16t:
+    url: datasets/nsd-flat/nsd-flat_{0000..0111}.tar
+    clipping: event
+    target_id_map: datasets/nsd_coco_73k_semantic_cluster_ids.npy
+    target_key: nsd_id
+  
+  # First 10 shards of subject 4
+  nsd-val-task-clips-16t:
+    url: datasets/nsd-flat/nsd-flat_{0112..0121}.tar
+    clipping: event
+    target_id_map: datasets/nsd_coco_73k_semantic_cluster_ids.npy
+    target_key: nsd_id
+
+  hcp-train-rest-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{0000..1799}.tar
+    clipping: random 
+    clipping_kwargs:
+      oversample: 0.33
+    select_files_pattern: "*mod-rfMRI*"
+
+  hcp-val-rest-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{1800..1899}.tar
+    clipping: random 
+    clipping_kwargs:
+      oversample: 0.33
+    select_files_pattern: "*mod-rfMRI*"
+
+  hcp-train-rest1-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{0000..1799}.tar
+    clipping: random 
+    clipping_kwargs:
+      oversample: 0.66
+    select_files_pattern: "*task-REST1*"
+  
+  hcp-train-rest2-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{0000..1799}.tar
+    clipping: random 
+    clipping_kwargs:
+      oversample: 0.66
+    select_files_pattern: "*task-REST2*"
+
+# By default generate all datasets.
+include_datasets: null

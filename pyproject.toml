@@ -9,50 +9,34 @@ description = "Sophont fMRI foundation model"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "accelerate",
-    "boto3==1.34.57",
-    "clip",
-    "decord",
-    "diffusers==0.23.0",
+    "datasets",
     "einops",
-    "ffmpeg-python",
-    "ftfy",
-    "h5py",
-    "ipywidgets",
+    "fvcore",
+    "huggingface_hub",
+    "iopath",
+    "ipython",
     "jupyter",
     "jupyterlab",
-    "jupyterlab-nvdashboard",
-    "kornia",
     "matplotlib",
-    "nibabel",
-    "nilearn",
     "numpy<2",
     "omegaconf",
-    "open-clip-torch",
-    "opencv-python==4.6.0.66",
     "pandas",
-    "pytorch-lightning==2.0.1",
-    "regex",
-    "scikit-image",
+    "pillow",
+    "pre-commit",
+    "pytest",
     "scikit-learn",
     "scipy",
-    "setuptools==66.1.1",
-    "sgm",
-    "smart-open",
+    "simplejson",
+    "timm",
     "torch==2.4.1",
-    "torchdata==0.10.1",
-    "torchmetrics==1.3.0.post0",
-    "torchvision==0.19.1",
+    "torchdata",
+    "torchmetrics",
+    "torchvision",
     "tqdm",
-    "transformers==4.44.2",
+    "transformers",
     "wandb",
     "webdataset",
 ]
 
-[tool.uv.sources]
-clip = { git = "https://github.com/openai/CLIP.git", rev = "dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1" }
-# Nov 2023 SD-Turbo release with a few minor changes
-sgm = { git = "https://github.com/SophontAI/generative-models.git", rev = "ab02deac54eb81a96035256c3fd86fa77d75db53" }
-
 [tool.setuptools_scm]
-version_file = "src/mae_utils/_version.py"
+version_file = "src/_version.py"
