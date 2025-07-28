@@ -184,7 +184,9 @@ def main(args: DictConfig):
             eval_plots[dataset_name] = ds_plots
 
         if args.output_dir and (
-            epoch % args.checkpoint_period == 0 or epoch + 1 == args.epochs or args.debug
+            epoch % args.checkpoint_period == 0
+            or epoch + 1 == args.epochs
+            or args.debug
         ):
             checkpoint_path = misc.save_model(
                 args=args,
@@ -199,7 +201,8 @@ def main(args: DictConfig):
         log_stats = {
             **{f"train__{k}": v for k, v in train_stats.items()},
             **{
-                f"eval__{ds_name}__{k}": v for ds_name, ds_stats in eval_stats.items()
+                f"eval__{ds_name}__{k}": v
+                for ds_name, ds_stats in eval_stats.items()
                 for k, v in ds_stats.items()
             },
             "epoch": epoch,
@@ -213,7 +216,8 @@ def main(args: DictConfig):
                 f.write(json.dumps(log_stats) + "\n")
 
         log_plots = {
-            f"eval__{ds_name}__{k}": img for ds_name, ds_plots in eval_plots.items()
+            f"eval__{ds_name}__{k}": img
+            for ds_name, ds_plots in eval_plots.items()
             for k, img in ds_plots.items()
         }
 
@@ -232,7 +236,6 @@ def main(args: DictConfig):
 
 
 def make_data_loaders(args: DictConfig):
-
     transform = make_flat_transform(
         clip_vmax=args.clip_vmax,
         normalize=args.normalize,
@@ -251,7 +254,9 @@ def make_data_loaders(args: DictConfig):
 
         if dataset_type == "flat-wds":
             samples_per_epoch = dataset_config.pop("samples_per_epoch")
-            dataset = make_flat_wds_dataset(num_frames=args.num_frames, **dataset_config)
+            dataset = make_flat_wds_dataset(
+                num_frames=args.num_frames, **dataset_config
+            )
             dataset = dataset.map(transform)
             sampler = None
             # the shuffle happens inside the dataset with a buffer.

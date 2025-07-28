@@ -17,6 +17,7 @@ class ClassificationWrapper(nn.Module):
     backbone: backbone model implementing forward_embedding
     classifiers: map of (feature_source, (lr_scale, weight_decay)) -> classifier
     """
+
     def __init__(
         self,
         backbone: nn.Module,
@@ -89,7 +90,9 @@ class AttnPoolClassifier(nn.Module):
         q = q.reshape(B, 1, self.num_heads, D // self.num_heads)  # [B, 1, head, D_head]
         q = q.permute(0, 2, 1, 3)  # [B, head, 1, D_head]
 
-        kv = self.kv(feat_tokens).reshape(B, N, 2, self.num_heads, D // self.num_heads)  # [B, N, 2, head, D_head]
+        kv = self.kv(feat_tokens).reshape(
+            B, N, 2, self.num_heads, D // self.num_heads
+        )  # [B, N, 2, head, D_head]
         kv = kv.permute(2, 0, 3, 1, 4)  # [2, B, head, N, D_head]
         k, v = torch.unbind(kv, dim=0)  # 2 * [B, head, N, D_head]
 
@@ -122,7 +125,9 @@ def pool_representations(
     if "avg_patch" in representations:
         out["avg_patch"] = patch_tokens.mean(1)  # [B, D]
     if "cls_avg_patch" in representations:
-        out["cls_avg_patch"] = torch.cat([cls_token, patch_tokens.mean(1)], dim=-1)  # [B, 2 * D]
+        out["cls_avg_patch"] = torch.cat(
+            [cls_token, patch_tokens.mean(1)], dim=-1
+        )  # [B, 2 * D]
     if "avg_objects" in representations:
         out["avg_objects"] = object_tokens.mean(1)  # [B, D]
     if "concat_objects" in representations:
@@ -209,7 +214,9 @@ class PatchEmbed(nn.Module):
         x = x.reshape(N, T * L, C)
 
         if self.sep_pos_embed:
-            pos_embed = self.pos_embed_temporal[:, :, None] + self.pos_embed_spatial[:, None, :]
+            pos_embed = (
+                self.pos_embed_temporal[:, :, None] + self.pos_embed_spatial[:, None, :]
+            )
             pos_embed = pos_embed.flatten(1, 2)
         else:
             pos_embed = self.pos_embed
@@ -246,7 +253,7 @@ class Connectome(nn.Module):
     ):
         N, C, T, H, W = imgs.shape
         assert C == 1
-        latent = imgs.reshape(N, T, H*W)  # [N, T, D]
+        latent = imgs.reshape(N, T, H * W)  # [N, T, D]
 
         # roi averaging
         latent = latent @ self.parc_weight.t()  # [N, T, R]
@@ -301,7 +308,7 @@ class PCA(nn.Module):
         self.embed_dim = embed_dim
 
         H, W = self.img_size
-        self.spatial_linear = nn.Linear(H*W, embed_dim)
+        self.spatial_linear = nn.Linear(H * W, embed_dim)
         self.temporal_linear = nn.Linear(num_frames, embed_dim, bias=False)
 
     def forward_embedding(
@@ -311,7 +318,7 @@ class PCA(nn.Module):
     ):
         N, C, T, H, W = imgs.shape
         assert C == 1
-        latent = imgs.reshape(N, T, H*W)  # [N, T, D]
+        latent = imgs.reshape(N, T, H * W)  # [N, T, D]
 
         # spatial projection
         latent = self.spatial_linear(latent)  # [N, T, d]
@@ -333,7 +340,7 @@ class ImageFlatten(nn.Module):
     ):
         N, C, T, H, W = imgs.shape
         assert C == 1
-        latent = imgs.reshape(N, T, H*W)  # [N, T, D]
+        latent = imgs.reshape(N, T, H * W)  # [N, T, D]
         cls_token = latent.mean(dim=1, keepdim=True)  # [N, D]
         return cls_token, None, latent
 

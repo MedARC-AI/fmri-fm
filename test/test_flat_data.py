@@ -1,4 +1,3 @@
-import numpy as np
 import pytest
 import torch
 import torch.nn.functional as F
@@ -17,7 +16,7 @@ def dummy_mask() -> torch.Tensor:
 def test_hemi_masking(dummy_mask: torch.Tensor):
     visible_mask = flat_data.hemi_masking(dummy_mask)
     H, W = visible_mask.shape
-    assert not (visible_mask[:, :W // 2].any() and visible_mask[:, W // 2:].any())
+    assert not (visible_mask[:, : W // 2].any() and visible_mask[:, W // 2 :].any())
     assert visible_mask.sum() == (H * W / 2)
 
 
@@ -38,7 +37,7 @@ def test_hemi_inverse_block_masking(dummy_mask: torch.Tensor):
     xmin, ymin = indices.amin(dim=0)
     xmax, ymax = indices.amax(dim=0)
     assert torch.maximum(xmax - xmin, ymax - ymin) <= 8
-    assert not (visible_mask[:, :W // 2].any() and visible_mask[:, W // 2:].any())
+    assert not (visible_mask[:, : W // 2].any() and visible_mask[:, W // 2 :].any())
     assert visible_mask.sum() == 64
 
 

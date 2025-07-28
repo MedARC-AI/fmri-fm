@@ -30,7 +30,7 @@ def mae_vit_tiny_patch16(**kwargs):
         (True, False),
         (False, True),
         (True, True),
-    ]
+    ],
 )
 @pytest.mark.parametrize(
     "img_size,in_chans,num_frames,t_patch_size,t_pred_patch_size",
@@ -47,7 +47,7 @@ def mae_vit_tiny_patch16(**kwargs):
         (224, 1, 16, 16, 16),
         # non-square image
         ([144, 224], 1, 16, 2, 1),
-    ]
+    ],
 )
 def test_mae_vit(
     img_size: int | tuple[int, int],
@@ -73,13 +73,13 @@ def test_mae_vit(
     x = torch.randn(2, in_chans, num_frames, H, W)
     if with_img_mask:
         img_mask = torch.zeros(H, W)
-        img_mask[18: H - 18, 18: W - 18] = 1
+        img_mask[18 : H - 18, 18 : W - 18] = 1
     else:
         img_mask = None
 
     if with_vis_mask:
         visible_mask = torch.ones(H, W)
-        visible_mask[:, W // 2:] = 0
+        visible_mask[:, W // 2 :] = 0
     else:
         visible_mask = None
 
@@ -121,7 +121,7 @@ def test_mae_masked_patch_embed():
     T, H, W = 16, 224, 224
     x = torch.randn(2, 3, T, H, W)
     img_mask = torch.zeros(H, W)
-    img_mask[18: H - 18, 18: W - 18] = 1
+    img_mask[18 : H - 18, 18 : W - 18] = 1
 
     model = mae_vit_tiny_patch16(mask_patch_embed=True)
     loss, pred, mask, decoder_mask = model.forward(x, img_mask=img_mask)

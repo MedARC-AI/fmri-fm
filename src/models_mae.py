@@ -265,7 +265,9 @@ class MaskedAutoencoderViT(nn.Module):
             total_patches = L
         len_keep = int(total_patches * (1 - mask_ratio))
 
-        noise = torch.rand(N, L, device=x.device, generator=generator)  # noise in [0, 1]
+        noise = torch.rand(
+            N, L, device=x.device, generator=generator
+        )  # noise in [0, 1]
 
         # shift invisible patches to not be selected
         if visible_patch_mask is not None:
@@ -546,9 +548,7 @@ class MaskedAutoencoderViT(nn.Module):
         T = self.patch_embed.t_grid_size
         H, W = self.patch_embed.grid_size
 
-        zeros = torch.zeros(
-            N, T * H * W, C, dtype=latent.dtype, device=latent.device
-        )
+        zeros = torch.zeros(N, T * H * W, C, dtype=latent.dtype, device=latent.device)
         latent = zeros.scatter(
             dim=1,
             index=ids_keep.unsqueeze(-1).expand(-1, -1, C),
@@ -582,7 +582,9 @@ class MaskedAutoencoderViT(nn.Module):
 
         ph, pw = self.patch_embed.patch_size
         pt = self.t_pred_patch_size
-        mask = mask.unsqueeze(-1).expand(-1, -1, pt * ph * pw * C)  # (N, T*H*W, u*p*p*c)
+        mask = mask.unsqueeze(-1).expand(
+            -1, -1, pt * ph * pw * C
+        )  # (N, T*H*W, u*p*p*c)
         mask = self.unpatchify(mask)  # 1 is removing, 0 is keeping
 
         mask = torch.einsum("ncthw->nthwc", mask)

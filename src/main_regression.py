@@ -40,7 +40,7 @@ from models_classification import (
     LinearClassifier,
     pool_representations,
 )
-from flat_data import FlatClipsDataset, make_flat_wds_dataset, make_flat_transform
+from flat_data import FlatClipsDataset, make_flat_transform
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 PROJECT = "fMRI-foundation-model"
@@ -147,7 +147,9 @@ def main(args: DictConfig):
 
     num_params = sum(p.numel() for p in model.parameters())
     num_params_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Num params (train): {num_params / 1e6:.1f}M ({num_params_train / 1e6:.1f}M)")
+    print(
+        f"Num params (train): {num_params / 1e6:.1f}M ({num_params_train / 1e6:.1f}M)"
+    )
 
     eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()
     args.lr = args.base_lr * eff_batch_size / 256
@@ -158,7 +160,8 @@ def main(args: DictConfig):
 
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(
-            model, device_ids=[torch.cuda.current_device()],
+            model,
+            device_ids=[torch.cuda.current_device()],
         )
         model_without_ddp = model.module
     else:
@@ -228,7 +231,9 @@ def main(args: DictConfig):
             eval_stats[dataset_name] = ds_stats
 
         if args.output_dir and (
-            epoch % args.checkpoint_period == 0 or epoch + 1 == args.epochs or args.debug
+            epoch % args.checkpoint_period == 0
+            or epoch + 1 == args.epochs
+            or args.debug
         ):
             checkpoint_path = misc.save_model(
                 args=args,
@@ -243,7 +248,8 @@ def main(args: DictConfig):
         log_stats = {
             **{f"train__{k}": v for k, v in train_stats.items()},
             **{
-                f"eval__{ds_name}__{k}": v for ds_name, ds_stats in eval_stats.items()
+                f"eval__{ds_name}__{k}": v
+                for ds_name, ds_stats in eval_stats.items()
                 for k, v in ds_stats.items()
             },
             "epoch": epoch,
@@ -288,7 +294,8 @@ def main(args: DictConfig):
 
         if args.distributed:
             best_model = torch.nn.parallel.DistributedDataParallel(
-                best_model, device_ids=[torch.cuda.current_device()],
+                best_model,
+                device_ids=[torch.cuda.current_device()],
             )
 
         test_stats = evaluate(
@@ -346,7 +353,7 @@ def make_data_loaders(args: DictConfig):
             shuffle_seed = dataset_config.get("shuffle_seed", 42)
             rng = np.random.default_rng(shuffle_seed)
             sample_order = rng.permutation(len(dataset))
-            split_indices = sample_order[split_start: split_stop]
+            split_indices = sample_order[split_start:split_stop]
             print(f"split indices: {split_indices[:10].tolist()}")
             dataset = Subset(dataset, split_indices)
 
@@ -383,7 +390,7 @@ def get_embedding_shapes(
     backbone: nn.Module,
     representations: list[str],
     loader: Iterable,
-    device: torch.device
+    device: torch.device,
 ):
     print("running backbone on example batch to get embedding shapes")
     example_batch = next(iter(loader))
@@ -397,15 +404,11 @@ def get_embedding_shapes(
         cls_token, object_tokens, patch_tokens, representations
     )
 
-    embedding_shapes = {
-        k: tuple(v.shape[1:]) for k, v in backbone_out.items()
-    }
+    embedding_shapes = {k: tuple(v.shape[1:]) for k, v in backbone_out.items()}
     return embedding_shapes
 
 
-def make_classifiers(
-    args: DictConfig, embedding_shapes: dict[str, tuple[int, ...]]
-):
+def make_classifiers(args: DictConfig, embedding_shapes: dict[str, tuple[int, ...]]):
     # create sweep of classifier heads with varying input features,
     # lr scales, weight decays.
     all_classifiers = {}
@@ -427,7 +430,9 @@ def make_classifiers(
                 embed_dim=args.get("attn_pool_embed_dim"),
             )
 
-        for lr_scale, weight_decay in product(args.lr_scale_grid, args.weight_decay_grid):
+        for lr_scale, weight_decay in product(
+            args.lr_scale_grid, args.weight_decay_grid
+        ):
             # TODO: should they all get the same init?
             clf = clf_fn()
             all_classifiers[(feature_source, (lr_scale, weight_decay))] = clf
@@ -437,7 +442,9 @@ def make_classifiers(
 
                 if (lr_scale, param_weight_decay) not in param_groups:
                     param_groups[lr_scale, param_weight_decay] = {
-                        "params": [], "lr_scale": lr_scale, "weight_decay": weight_decay
+                        "params": [],
+                        "lr_scale": lr_scale,
+                        "weight_decay": weight_decay,
                     }
 
                 param_groups[lr_scale, param_weight_decay]["params"].append(param)
@@ -511,7 +518,9 @@ def train_one_epoch(
 
             all_loss = F.mse_loss(
                 all_pred,
-                target[:, :, None].expand_as(all_pred),  # [B, num_targets, num_classifiers]
+                target[:, :, None].expand_as(
+                    all_pred
+                ),  # [B, num_targets, num_classifiers]
                 reduction="none",
             ).mean(dim=0)  # [num_targets, num_classifiers]
 
@@ -556,13 +565,11 @@ def train_one_epoch(
             """We use epoch_1000x as the x-axis in tensorboard.
             This calibrates different curves when batch size changes.
             """
-            epoch_1000x = int(
-                (data_iter_step / num_batches + epoch) * 1000
-            )
+            epoch_1000x = int((data_iter_step / num_batches + epoch) * 1000)
             log_stats = {
                 "train/loss": loss_value,
                 "train/lr": lr,
-                **{f"train/{k}": v for k, v in log_loss_dict.items()}
+                **{f"train/{k}": v for k, v in log_loss_dict.items()},
             }
             wandb.log(log_stats, step=epoch_1000x)
 
@@ -625,7 +632,9 @@ def evaluate(
 
             all_loss = F.mse_loss(
                 all_pred,
-                target[:, :, None].expand_as(all_pred),  # [B, num_targets, num_classifiers]
+                target[:, :, None].expand_as(
+                    all_pred
+                ),  # [B, num_targets, num_classifiers]
                 reduction="none",
             ).mean(dim=0)  # [num_targets, num_classifiers]
 
@@ -641,14 +650,18 @@ def evaluate(
             fmt_key = format_clf_key(key)
             all_meters[f"loss_{fmt_key}"].update(mean_loss_values[ii])
             for jj, target_name in enumerate(args.target_names):
-                all_meters[f"loss_{target_name}_{fmt_key}"].update(all_loss_values[jj, ii])
+                all_meters[f"loss_{target_name}_{fmt_key}"].update(
+                    all_loss_values[jj, ii]
+                )
 
         log_loss_dict = {}
         for feature_source, hparam in log_classifier_keys.items():
             idx = clf_key_to_idx[(feature_source, hparam)]
             log_loss_dict[f"loss_{feature_source}"] = mean_loss_values[idx]
             for jj, target_name in enumerate(args.target_names):
-                log_loss_dict[f"loss_{target_name}_{feature_source}"] = all_loss_values[jj, idx]
+                log_loss_dict[f"loss_{target_name}_{feature_source}"] = all_loss_values[
+                    jj, idx
+                ]
         metric_logger.update(**log_loss_dict)
 
         if args.debug and (data_iter_step + 1) >= debug_steps:
@@ -664,7 +677,9 @@ def evaluate(
     if log_wandb:
         # eval at the end of training, so epoch + 1
         epoch_1000x = int((epoch + 1) * 1000)
-        wandb.log({f"eval/{eval_name}/{k}": v for k, v in stats.items()}, step=epoch_1000x)
+        wandb.log(
+            {f"eval/{eval_name}/{k}": v for k, v in stats.items()}, step=epoch_1000x
+        )
 
     stats.update({k: meter.global_avg for k, meter in all_meters.items()})
 

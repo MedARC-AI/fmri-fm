@@ -11,7 +11,6 @@
 
 import builtins
 import datetime
-import math
 import os
 import subprocess
 import time
@@ -287,7 +286,9 @@ class NativeScalerWithGradNormCount:
         self._scaler.scale(loss).backward(create_graph=create_graph)
 
         if parameters is None:
-            parameters = [p for group in optimizer.param_groups for p in group["params"]]
+            parameters = [
+                p for group in optimizer.param_groups for p in group["params"]
+            ]
 
         if update_grad:
             # unscale the gradients of optimizer's assigned params in-place

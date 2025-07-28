@@ -8,7 +8,6 @@
 # --------------------------------------------------------
 
 import util.logging as logging
-import numpy as np
 import torch
 
 

@@ -67,9 +67,9 @@ class PatchEmbed(nn.Module):
 
     def forward(self, x, mask=None):
         B, C, T, H, W = x.shape
-        assert (
-            H == self.img_size[0] and W == self.img_size[1]
-        ), f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+        assert H == self.img_size[0] and W == self.img_size[1], (
+            f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+        )
         assert T == self.frames
         if mask is not None:
             mask = (mask > 0).float()
