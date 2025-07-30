@@ -1,4 +1,3 @@
-
 import pytest
 import torch
 from timm.layers import to_2tuple
@@ -18,7 +17,7 @@ def mae_linear_tiny_patch16(**kwargs):
         (True, False),
         (False, True),
         (True, True),
-    ]
+    ],
 )
 @pytest.mark.parametrize(
     "img_size,in_chans,num_frames,t_patch_size,t_pred_patch_size",
@@ -31,7 +30,7 @@ def mae_linear_tiny_patch16(**kwargs):
         (64, 1, 8, 8, 8),
         # non-square image
         ([64, 96], 1, 8, 2, 1),
-    ]
+    ],
 )
 @pytest.mark.parametrize("framewise", [False, True])
 def test_mae_linear(
@@ -60,13 +59,13 @@ def test_mae_linear(
     x = torch.randn(2, in_chans, num_frames, H, W)
     if with_img_mask:
         img_mask = torch.zeros(H, W)
-        img_mask[18: H - 18, 18: W - 18] = 1
+        img_mask[18 : H - 18, 18 : W - 18] = 1
     else:
         img_mask = None
 
     if with_vis_mask:
         visible_mask = torch.ones(H, W)
-        visible_mask[:, W // 2:] = 0
+        visible_mask[:, W // 2 :] = 0
     else:
         visible_mask = None
 

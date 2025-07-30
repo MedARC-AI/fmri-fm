@@ -13,6 +13,7 @@ class MaskedLinear(nn.Linear):
     """
     Linear layer that scales output to account for size of observed mask.
     """
+
     def forward(
         self, input: torch.Tensor, mask: torch.Tensor | None = None
     ) -> torch.Tensor:
@@ -38,6 +39,7 @@ class MaskedAutoencoderLinear(nn.Module):
 
     Copied with minor modifications from MaskedAutoencoderViT.
     """
+
     def __init__(
         self,
         img_size=224,
@@ -285,9 +287,7 @@ class MaskedAutoencoderLinear(nn.Module):
         if visible_mask is not None:
             visible_mask = visible_mask.expand_as(imgs)
 
-        latent, mask = self.forward_encoder(
-            imgs, mask_ratio, visible_mask
-        )
+        latent, mask = self.forward_encoder(imgs, mask_ratio, visible_mask)
         decoder_mask = mask  # for consistency with mae vit
         pred = self.forward_decoder(latent)
         loss = self.forward_loss(imgs, pred, decoder_mask, img_mask)
@@ -314,7 +314,9 @@ class MaskedAutoencoderLinear(nn.Module):
 
         ph, pw = self.patch_size
         pt = self.t_pred_patch_size
-        mask = mask.unsqueeze(-1).expand(-1, -1, pt * ph * pw * C)  # (N, T*H*W, u*p*p*c)
+        mask = mask.unsqueeze(-1).expand(
+            -1, -1, pt * ph * pw * C
+        )  # (N, T*H*W, u*p*p*c)
         mask = self.unpatchify(mask)  # 1 is removing, 0 is keeping
 
         mask = torch.einsum("ncthw->nthwc", mask)

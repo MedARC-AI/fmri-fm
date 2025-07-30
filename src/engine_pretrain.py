@@ -110,16 +110,15 @@ def train_one_epoch(
         metric_logger.update(gpu_mem=misc.gpu_mem_usage())
         # TODO: log mask stats?
 
-
         loss_value_reduce = misc.all_reduce_mean(loss_value)
         if log_wandb and (data_iter_step + 1) % accum_iter == 0:
             """We use epoch_1000x as the x-axis in tensorboard.
             This calibrates different curves when batch size changes.
             """
-            epoch_1000x = int(
-                (data_iter_step / num_batches + epoch) * 1000
+            epoch_1000x = int((data_iter_step / num_batches + epoch) * 1000)
+            wandb.log(
+                {"train/loss": loss_value_reduce, "train/lr": lr}, step=epoch_1000x
             )
-            wandb.log({"train/loss": loss_value_reduce, "train/lr": lr}, step=epoch_1000x)
 
         if args.debug and (data_iter_step + 1) >= debug_steps:
             break
@@ -212,8 +211,8 @@ def evaluate(
     img_mask = example_data["img_mask"]
     visible_mask = example_data["visible_mask"]
 
-    target, _, _, im_masked, im_paste, img_mask = model_without_ddp.forward_masked_recon(
-        samples, pred, mask, img_mask=img_mask
+    target, _, _, im_masked, im_paste, img_mask = (
+        model_without_ddp.forward_masked_recon(samples, pred, mask, img_mask=img_mask)
     )
     mask_pred_fig = vis.plot_mask_pred(target, im_masked, im_paste, img_mask=img_mask)
     mask_pred_img = vis.fig2pil(mask_pred_fig)
@@ -222,7 +221,9 @@ def evaluate(
     if log_wandb:
         # eval at the end of training, so epoch + 1
         epoch_1000x = int((epoch + 1) * 1000)
-        wandb.log({f"eval/{eval_name}/{k}": v for k, v in stats.items()}, step=epoch_1000x)
+        wandb.log(
+            {f"eval/{eval_name}/{k}": v for k, v in stats.items()}, step=epoch_1000x
+        )
         wandb.log(
             {f"eval/{eval_name}/{k}": wandb.Image(img) for k, img in plots.items()},
             step=epoch_1000x,

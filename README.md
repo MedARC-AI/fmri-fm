@@ -1,10 +1,14 @@
-# fMRI Foundation Model
+# MedARC - fMRI Foundation Model
 
-In-progress -- this repo is under active development by Sophont
+*In-progress -- this repo is under active development by [MedARC](https://www.medarc.ai). [Join our Discord](https://discord.com/invite/CqsMthnauZ) to get involved!*
+
+<p align="center">
+  <img src=".github/fMRI MAE ViT.svg" width="600">
+</p>
 
 ## Installation
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), clone the repo, and run
+Clone the repo, install [uv](https://docs.astral.sh/uv/getting-started/installation/), and run
 
 ```bash
 uv sync
@@ -18,34 +22,38 @@ source .venv/bin/activate
 
 or use `uv run`. See the [uv docs](https://docs.astral.sh/uv/getting-started/) for more details.
 
-## Datasets
+### Pre-commit hooks
 
-- https://huggingface.co/datasets/bold-ai/HCP-Flat
-- https://huggingface.co/datasets/bold-ai/NSD-Flat
-- https://huggingface.co/datasets/pscotti/mindeyev2
+If you are planning to contribute, you should also install our [pre-commit](https://pre-commit.com/) hooks.
 
-## Usage
+```bash
+pre-commit install
+```
 
-### 1. Train MAE
+## Codebase structure
 
-- main.ipynb (use accel.slurm to allocate multi-gpu Slurm job)
+The codebase follows a [flat organization](https://www.evandemond.com/programming/wide-and-flat) for easy forking and hacking. It was originally forked from [MAE-st](https://github.com/facebookresearch/mae_st).
 
-### 2a. Downstream probe using frozen MAE latents
+**Training scripts**
 
-Save latents to hdf5 / parquet:
+- [`main_pretrain.py`](src/main_pretrain.py): Main foundation model pretraining script.
+- [`main_classification.py`](src/main_classification.py): Script for downstream classification evaluations.
+- [`main_regression.py`](src/main_regression.py): Script for downstream regression evaluations.
 
-- prep_mindeye_downstream.ipynb
-- prep_HCP_downstream.ipynb
+**Models**
 
-Then evaluate downstream performance using the saved latents:
+- [`models_mae.py`](src/models_mae.py): Spatiotemporal masked autoencoder (MAE-st) for fMRI data.
+- [`models_vit.py`](src/models_vit.py): Vanilla vision transformer (ViT) for fMRI data.
+- [`models_mae_linear.py`](src/models_mae_linear.py): Linear masked autoencoder baseline.
 
-- mindeye_downstream.ipynb
-- HCP_downstream.ipynb
+**Datasets**
 
-### 2b. Full fine-tuning of both MAE and downstream model
+- [`flat_data.py`](src/flat_data.py): Dataset code for fMRI cortical flat map datasets.
 
-This requires having access to train_subj01.hdf5 which is saved in "/weka/proj-fmri/paulscotti/fMRI-foundation-model/src".
+## Contributing
 
-If you cannot access this file, the commented out code shows how to create this file yourself.
+This is a community-driven open science project. We welcome all contributions. To get started contributing, see our [contributing guide](CONTRIBUTING.md) and [code of conduct](CODE_OF_CONDUCT.md). Then take a look at our [open issues](https://github.com/SophontAI/fmri-fm/issues/).
 
-- mindeye_finetuning.ipynb
+## License
+
+The code is released under the CC-BY-NC 4.0 license. See [LICENSE](LICENSE) for details.

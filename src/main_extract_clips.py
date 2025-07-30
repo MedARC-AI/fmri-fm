@@ -22,7 +22,7 @@ def main(args: DictConfig):
     for dataset_name in include_datasets:
         dataset_config = args.datasets[dataset_name]
         print(f"dataset: {dataset_name}\n\n{OmegaConf.to_yaml(dataset_config)}")
-        
+
         dataset_dir = output_dir / dataset_name
         if dataset_dir.exists():
             print(f"dataset output dir {dataset_dir} exists; skipping.")

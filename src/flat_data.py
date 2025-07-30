@@ -60,6 +60,7 @@ class FlatClipsDataset(Dataset):
     """
     Standard folder dataset of pre-extracted fmri flat clips.
     """
+
     def __init__(
         self,
         root: str | Path,
@@ -107,6 +108,7 @@ def random_clips(num_frames: int = 16, oversample: float = 1.0):
 
     The number of clips is `oversample * T / num_frames`.
     """
+
     def _filter(dataset: Iterable[dict[str, Any]]):
         for sample in dataset:
             image = sample["image"]
@@ -158,6 +160,7 @@ def event_clips(num_frames: int = 16, tr: float = 1.0, hrf_delay: float = 0.0):
     hrf_delay > 0, e.g. to 3 or 4 seconds can concentrate the clip more on the
     activation peak.
     """
+
     def _filter(dataset: Iterable[dict[str, Any]]):
         for sample in dataset:
             image = sample["image"]
@@ -228,6 +231,7 @@ def load_target_id_map(target_id_map: Path) -> dict[Any, int]:
 def make_select_files(select_files_pattern: str) -> Callable[[str], bool]:
     def _filter(fname: str):
         return fnmatch.fnmatch(fname, select_files_pattern)
+
     return _filter
 
 
@@ -315,10 +319,10 @@ def hemi_masking(mask: torch.Tensor) -> torch.Tensor:
     visible_mask = torch.ones_like(mask)
     if np.random.rand() < 0.5:
         # lh visible
-        visible_mask[:, W // 2:] = 0
+        visible_mask[:, W // 2 :] = 0
     else:
         # rh visible
-        visible_mask[:, :W // 2] = 0
+        visible_mask[:, : W // 2] = 0
     return visible_mask
 
 
@@ -329,7 +333,7 @@ def inverse_block_masking(mask: torch.Tensor, block_size: int = 160) -> torch.Te
     w_idx = np.random.randint(0, W - block_size)
 
     visible_mask = torch.zeros_like(mask)
-    visible_mask[h_idx: h_idx + block_size, w_idx: w_idx + block_size] = 1
+    visible_mask[h_idx : h_idx + block_size, w_idx : w_idx + block_size] = 1
     return visible_mask
 
 
@@ -348,7 +352,7 @@ def hemi_inverse_block_masking(
     w_idx = np.random.randint(w_start, w_stop - block_size)
 
     visible_mask = torch.zeros_like(mask)
-    visible_mask[h_idx: h_idx + block_size, w_idx: w_idx + block_size] = 1
+    visible_mask[h_idx : h_idx + block_size, w_idx : w_idx + block_size] = 1
     return visible_mask
 
 

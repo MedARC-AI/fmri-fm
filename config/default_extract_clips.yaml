@@ -43,7 +43,7 @@ datasets:
     clipping: event
     target_id_map: datasets/nsd_coco_73k_semantic_cluster_ids.npy
     target_key: nsd_id
-  
+
   # First 10 shards of subject 4
   nsd-val-task-clips-16t:
     url: datasets/nsd-flat/nsd-flat_{0112..0121}.tar
@@ -53,28 +53,28 @@ datasets:
 
   hcp-train-rest-clips-16t:
     url: datasets/hcp-flat/hcp-flat_{0000..1799}.tar
-    clipping: random 
+    clipping: random
     clipping_kwargs:
       oversample: 0.33
     select_files_pattern: "*mod-rfMRI*"
 
   hcp-val-rest-clips-16t:
     url: datasets/hcp-flat/hcp-flat_{1800..1899}.tar
-    clipping: random 
+    clipping: random
     clipping_kwargs:
       oversample: 0.33
     select_files_pattern: "*mod-rfMRI*"
 
   hcp-train-rest1-clips-16t:
     url: datasets/hcp-flat/hcp-flat_{0000..1799}.tar
-    clipping: random 
+    clipping: random
     clipping_kwargs:
       oversample: 0.66
     select_files_pattern: "*task-REST1*"
-  
+
   hcp-train-rest2-clips-16t:
     url: datasets/hcp-flat/hcp-flat_{0000..1799}.tar
-    clipping: random 
+    clipping: random
     clipping_kwargs:
       oversample: 0.66
     select_files_pattern: "*task-REST2*"
