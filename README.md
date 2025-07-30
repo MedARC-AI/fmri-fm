@@ -52,7 +52,7 @@ The codebase follows a [flat organization](https://www.evandemond.com/programmin
 
 ## Contributing
 
-This is a community-driven open science project. We welcome all contributions. To get started contributing, see our [contributing guide](CONTRIBUTING.md) and [code of conduct](CODE_OF_CONDUCT.md).
+This is a community-driven open science project. We welcome all contributions. To get started contributing, see our [contributing guide](CONTRIBUTING.md) and [code of conduct](CODE_OF_CONDUCT.md). Then take a look at our [open issues](https://github.com/SophontAI/fmri-fm/issues/).
 
 ## License
 
