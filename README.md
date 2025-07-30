@@ -2,6 +2,10 @@
 
 *In-progress -- this repo is under active development by [MedARC](https://www.medarc.ai). [Join our Discord](https://discord.com/invite/CqsMthnauZ) to get involved!*
 
+<p align="center">
+  <img src=".github/fMRI MAE ViT.svg" width="600">
+</p>
+
 ## Installation
 
 Clone the repo, install [uv](https://docs.astral.sh/uv/getting-started/installation/), and run
@@ -52,4 +56,4 @@ This is a community-driven open science project. We welcome all contributions. T
 
 ## License
 
-The code is released under the Apache License 2.0. See [LICENSE](LICENSE) for additional details.
+The code is released under the CC-BY-NC 4.0 license. See [LICENSE](LICENSE) for details.
