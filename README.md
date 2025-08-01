@@ -6,6 +6,8 @@
   <img src=".github/fMRI MAE ViT.svg" width="600">
 </p>
 
+Our goal is to train state-of-the-art foundation models for fMRI. To best leverage prior work in self-supervised learning for natural images and video, our approach is based on a *flat map* representation of the fMRI data. Read more on our approach and related work in [`BACKGROUND.md`](BACKGROUND.md).
+
 ## Installation
 
 Clone the repo, install [uv](https://docs.astral.sh/uv/getting-started/installation/), and run
