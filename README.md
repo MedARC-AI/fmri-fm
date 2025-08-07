@@ -3,7 +3,7 @@
 *In-progress -- this repo is under active development by [MedARC](https://www.medarc.ai). [Join our Discord](https://discord.com/invite/CqsMthnauZ) to get involved!*
 
 <p align="center">
-  <img src=".github/fMRI MAE ViT.svg" width="600">
+  <img src=".github/fMRI_MAE_ViT.svg" width="600">
 </p>
 
 Our goal is to train state-of-the-art foundation models for fMRI. To best leverage prior work in self-supervised learning for natural images and video, our approach is based on a *flat map* representation of the fMRI data. Read more on our approach and related work in [`BACKGROUND.md`](BACKGROUND.md).

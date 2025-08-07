@@ -1,66 +1,33 @@
-### Motivation
+## Background
 
-The human brain is the most complex system we know of. Accurately diagnosing and treating its range of dysfunctions is largely beyond the limit of modern medicine. Functional neuroimaging data such as fMRI and EEG provide a possible window into better understanding how the brain works, why it sometimes breaks down, and what to do about it. After decades of effort, however, it feels as though we are still far from applying these data to real clinical purpose. One challenge is that the data are a mess. They are extremely noisy, blurry, and difficult to visually interpret. But on the positive side, we have collected a *lot* of it. In many other data domains, we have seen that by combining large amounts of data together with flexible neural network models and large-scale compute, one can "unlock" the signal in complex noisy data. Our goal is to answer a simple question: can we do the same with functional neuroimaging?
+**Motivation.** Our goal is to train a foundation model for functional MRI (fMRI) data. The basic strategy is to leverage large-scale publicly available fMRI data to train models that can "decode" noisy fMRI data into structured, interpretable "neuro embeddings". In turn, we hope that these learned neuro embeddings will enable downstream tasks such as identifying early biomarkers of neurodegenerative disease, distinguishing subtypes of neuropsychiatric conditions, predicting an individual's response to specific mental health treatment, and decoding the contents of a person's perception.
 
-### Related work
+<p align="center">
+  <img src=".github/fMRI_FM_overview.svg" width="400">
+</p>
 
-Building clinically predictive models using functional neuroimaging data has of course been a longstanding goal[^1] [^2]. The current dominant approach combines expert-crafted features, for example resting-state functional connectivity matrices, together with classic shallow machine learning models. See for example[^3], and many other references cited within and since. Unlike other domains like images and text, brain data do not seem to immediately yield to deep learning based approaches[^4] [^5]. Although there are some success cases of shallow nonlinear networks applied to functional brain imaging data, e.g.[^6] [^7] [^8].
+In the past 2-3 years, we've seen growing interest around training deep learning "foundation" models on large-scale fMRI data. For example, [\[Thomas et al., NeurIPS 2022\]](https://proceedings.neurips.cc/paper_files/paper/2022/hash/8600a9df1a087a9a66900cc8c948c3f0-Abstract-Conference.html), [\[SwiFT, NeurIPS 2023\]](https://proceedings.neurips.cc/paper_files/paper/2023/hash/8313b1920ee9c78d846c5798c1ce48be-Abstract-Conference.html), [\[BrainLM, ICLR 2024\]](https://openreview.net/forum?id=RwI7ZEfR27), [\[Brain-JEPA, NeurIPS 2024\]](https://openreview.net/forum?id=gtU2eLSAmO), [\[BrainSymphony, ArXiv 2025\]](https://arxiv.org/abs/2506.18314), [\[NeuroSTORM, ArXiv 2025\]](https://arxiv.org/abs/2506.11167). One of the key decisions to make when designing an fMRI foundation model is how to format the data for input to the model. Most of the prior works use a parcellation based approach, where each 3D fMRI volume is first reduced to a fixed dimension vector by averaging the activity within a set of non-overlapping "parcels". But this dimensionality reduction from ~100K voxels to ~1K parcels inevitably loses information. Some works instead choose to preserve the full data fidelity by training models directly on the 4D volumetric fMRI data. But the 4D structure of fMRI data is complicated, and it's not clear that we currently have enough data and/or the right architectures and training objectives to learn all this structure.
 
-One challenge to training high capacity deep learning models for functional neuroimaging is that the amount of *labeled* data available for any particular prediction task is limited. Outside of neuroimaging, this challenge has largely been addressed through the development of self-supervised learning (SSL) methods, where models are first trained to solve some pretext task on unlabeled data. SSL is a natural fit for functional neuroimaging, thanks to the large amounts of publicly available data without clinically specific labels (e.g. HCP [^9], UKBB[^10], ABCD[^11], OpenNeuro[^12]).
+<p align="center">
+  <img src=".github/bitter_lesson_cs25.svg" width="400">
+</p>
 
+**Approach.** Our current strategy is to take an intermediate approach that preserves the full dimensionality of the data, while removing some of the complexity of modeling fMRI in native 4D volumetric space. Specifically, we leverage a cortical *flat map* representation of the fMRI data. To format a 4D fMRI time series for input to the model, we first extract the data for the left and right cortical hemispheres, project the data to a cortical surface mesh, and finally flatten the 3D surface mesh to a 2D flat map. The result is a video of 2D flat map fMRI activity patterns. Crucially, all ~100K voxel fMRI time series are preserved by this transformation. They have just been reorganized into a representation that is more accessible to standard 2D image and 3D video modeling.
 
-In the context of computer vision, some example SSL methods include:
+<p align="center">
+  <img src=".github/fMRI_flat_map_pipeline.svg" width="600">
+</p>
 
-- contrastive learning methods trained to learn invariant representations across multiple image views (e.g. SimCLR[^9], MoCo[^10])
-- self-distillation methods which remove the need for negative examples (e.g. BYOL[^11], DINO[^12], SimSiam[^13])
-- masked image modeling (MIM) methods which make predictions for unobserved parts of the image rather than unobserved views (e.g. iBOT[^14], MAE[^15], BEIT[^16]).
-- methods which combine elements across these groups (e.g. DINOv2[^17], CAPI[^18])
+Our current model uses a vision transformer (ViT) architecture and masked autoencoding ([MAE](https://arxiv.org/abs/2111.06377), [MAE-st](https://arxiv.org/abs/2205.09113)) objective. Specifically, we first "patchify" the input flat map videos using a linear spatiotemporal patch embedding together with a learned spatiotemporal position encoding. We then pass a small random fraction of observed patches to the ViT encoder-decoder, which is trained to reconstruct the unobserved patches.
 
-### Approach
+<p align="center">
+  <img src=".github/fMRI_MAE_ViT_v2.svg" width="400">
+</p>
 
+**Results and next steps.** We've so far seen strong performance on masked reconstruction and downstream decoding tasks (HCP cognitive task-state classification, NSD CLIP cluster classification) which improves with increasing model size up to ViT-B (86M params). Though we haven't yet established strong performance for subject-level downstream tasks such as clinical diagnosis prediction, or seen strong evidence for performance scaling with the amount of pretraining data.
 
-### References
+<p align="center">
+  <img src=".github/fMRI_FM_result_summary.svg" width="600">
+</p>
 
-[^1]: Gabrieli JD, Ghosh SS, Whitfield-Gabrieli S. [Prediction as a humanitarian and pragmatic contribution from human cognitive neuroscience](https://doi.org/10.1016/j.neuron.2014.10.047). Neuron. 2015.
-
-[^2]: Woo CW, Chang LJ, Lindquist MA, Wager TD. [Building better biomarkers: brain models in translational neuroimaging](https://doi.org/10.1038/nn.4478). Nature neuroscience. 2017.
-
-[^3]: He T, An L, Chen P, Chen J, Feng J, Bzdok D, Holmes AJ, Eickhoff SB, Yeo BT. [Meta-matching as a simple framework to translate phenotypic predictive models from big to small data](https://doi.org/10.1038/s41593-022-01059-9). Nature neuroscience. 2022.
-
-[^4]: He T, Kong R, Holmes AJ, Nguyen M, Sabuncu MR, Eickhoff SB, Bzdok D, Feng J, Yeo BT. [Deep neural networks and kernel regression achieve comparable accuracies for functional connectivity prediction of behavior and demographics](https://doi.org/10.1016/j.neuroimage.2019.116276). NeuroImage. 2020.
-
-[^5]: Schulz MA, Yeo BT, Vogelstein JT, Mourao-Miranada J, Kather JN, Kording K, Richards B, Bzdok D. [Different scaling of linear models and deep learning in UKBiobank brain images versus machine-learning datasets](https://doi.org/10.1038/s41467-020-18037-z). Nature communications. 2020.
-
-[^6]: Heinsfeld AS, Franco AR, Craddock RC, Buchweitz A, Meneguzzi F. [Identification of autism spectrum disorder using deep learning and the ABIDE dataset](https://doi.org/10.1016/j.nicl.2017.08.017). NeuroImage: clinical. 2018.
-
-[^7]: Peng H, Gong W, Beckmann CF, Vedaldi A, Smith SM. [Accurate brain age prediction with lightweight deep neural networks](https://doi.org/10.1016/j.media.2020.101871). Medical image analysis. 2021.
-
-[^8]: Popov P, Mahmood U, Fu Z, Yang C, Calhoun V, Plis S. [A simple but tough-to-beat baseline for fMRI time-series classification](https://doi.org/10.1016/j.neuroimage.2024.120909). NeuroImage. 2024 Dec 1;303:120909.
-
-[^9]: Van Essen DC, et al. [The WU-Minn human connectome project: an overview. Neuroimage](https://www.humanconnectome.org/). 2013.
-
-[^10]: Bycroft C, et al. [The UK Biobank resource with deep phenotyping and genomic data](https://www.ukbiobank.ac.uk/). Nature. 2018.
-
-[^11]: Casey BJ, et al. [The adolescent brain cognitive development (ABCD) study: imaging acquisition across 21 sites](https://abcdstudy.org/). Developmental cognitive neuroscience. 2018.
-
-[^12]: Markiewicz CJ, et al. [The OpenNeuro resource for sharing of neuroscience data](https://doi.org/10.7554/eLife.71774). Elife. 2021.
-
-[^9]: Chen T, Kornblith S, Norouzi M, Hinton G. [A simple framework for contrastive learning of visual representations](https://proceedings.mlr.press/v119/chen20j.html). International conference on machine learning. 2020.
-
-[^10]: He K, Fan H, Wu Y, Xie S, Girshick R. [Momentum contrast for unsupervised visual representation learning](https://openaccess.thecvf.com/content_CVPR_2020/html/He_Momentum_Contrast_for_Unsupervised_Visual_Representation_Learning_CVPR_2020_paper.html). CVPR. 2020.
-
-[^11]: Grill JB, Strub F, Altché F, Tallec C, Richemond P, Buchatskaya E, Doersch C, Avila Pires B, Guo Z, Gheshlaghi Azar M, Piot B. [Bootstrap your own latent-a new approach to self-supervised learning](https://proceedings.neurips.cc/paper/2020/hash/f3ada80d5c4ee70142b17b8192b2958e-Abstract.html). NeurIPS. 2020.
-
-[^12]: Chen X, He K. [Exploring simple siamese representation learning](https://openaccess.thecvf.com/content/CVPR2021/html/Chen_Exploring_Simple_Siamese_Representation_Learning_CVPR_2021_paper.html). CVPR. 2021
-
-[^13]: Caron M, Touvron H, Misra I, Jégou H, Mairal J, Bojanowski P, Joulin A. [Emerging properties in self-supervised vision transformers](https://arxiv.org/abs/2104.14294). ICCV. 2021.
-
-[^14]: Zhou J, Wei C, Wang H, Shen W, Xie C, Yuille A, Kong T. [ibot: Image bert pre-training with online tokenizer](https://arxiv.org/abs/2111.07832). ICLR. 2022.
-
-[^15]: He K, Chen X, Xie S, Li Y, Dollár P, Girshick R. [Masked autoencoders are scalable vision learners](https://arxiv.org/abs/2111.06377). CVPR. 2022.
-
-[^16]: Bao H, Dong L, Piao S, Wei F. [Beit: Bert pre-training of image transformers](https://openreview.net/forum?id=p-BhZSz59o4). ICLR. 2022.
-
-[^17]: Oquab M, Darcet T, Moutakanni T, Vo H, Szafraniec M, Khalidov V, Fernandez P, Haziza D, Massa F, El-Nouby A, Assran M. [Dinov2: Learning robust visual features without supervision](https://openreview.net/forum?id=a68SUt6zFt). TMLR. 2024.
-
-[^18]: Darcet T, Baldassarre F, Oquab M, Mairal J, Bojanowski P. [Cluster and predict latent patches for improved masked image modeling](https://arxiv.org/abs/2502.08769). TMLR. 2025.
+We still have a lot of work to do refining our architecture and pretraining objective, tuning our training recipe, and implementing evaluations and ablations. In addition, we would like to explore variations in the training objective beyond vanilla MAE. We are tracking specific open project directions in our [github issues](https://github.com/SophontAI/fmri-fm/issues). If you're interested in getting involved, take a look there and see what could be of interest! Then just send a message in the Discord [#fmri-fm](https://discord.com/channels/1025299671226265621/1399064456662880257) channel to start discussing. See also our [contributing guide](CONTRIBUTING.md) for more details on the contribution process.
