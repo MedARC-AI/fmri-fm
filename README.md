@@ -32,6 +32,10 @@ If you are planning to contribute, you should also install our [pre-commit](http
 pre-commit install
 ```
 
+## Quickstart
+
+See our [quickstart notebook](notebooks/quickstart.ipynb) for a demo of loading a model and plotting predictions.
+
 ## Codebase structure
 
 The codebase follows a [flat organization](https://www.evandemond.com/programming/wide-and-flat) for easy forking and hacking. It was originally forked from [MAE-st](https://github.com/facebookresearch/mae_st).
