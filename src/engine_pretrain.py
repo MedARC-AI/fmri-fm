@@ -17,6 +17,7 @@ import util.misc as misc
 import util.visualization as vis
 import torch
 import wandb
+from matplotlib import pyplot as plt
 
 
 def train_one_epoch(
@@ -216,6 +217,7 @@ def evaluate(
     )
     mask_pred_fig = vis.plot_mask_pred(target, im_masked, im_paste, img_mask=img_mask)
     mask_pred_img = vis.fig2pil(mask_pred_fig)
+    plt.close(mask_pred_fig)
     plots = {"mask_pred": mask_pred_img}
 
     if log_wandb:

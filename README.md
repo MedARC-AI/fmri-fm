@@ -32,9 +32,26 @@ If you are planning to contribute, you should also install our [pre-commit](http
 pre-commit install
 ```
 
-## Quickstart
+## Datasets
+
+We have small dataset subsets available for testing on [huggingface](https://huggingface.co/datasets/medarc/fmri-fm.datasets). Full datasets are not yet released. After downloading, the files should be placed under `datasets/` in the project root directory.
+
+## Getting started
 
 See our [quickstart notebook](notebooks/quickstart.ipynb) for a demo of loading a model and plotting predictions.
+
+To launch a debug pretraining run on one gpu, run
+
+```bash
+uv run python src/main_pretrain.py --cfg-path config/debug_pretrain.yaml
+```
+
+Or to run on cpu:
+
+```bash
+uv run python src/main_pretrain.py --cfg-path config/debug_pretrain.yaml \
+  --overrides device=cpu
+```
 
 ## Codebase structure
 

@@ -1,0 +1,42 @@
+# Name of the run. For output directory and wandb.
+name: debug_pretrain_hcp
+
+# Model
+model: mae_vit_small_patch16
+
+# Optimization
+epochs: 5
+# batch size per gpu, so total_batch_size = batch_size * num_gpus_per_node * num_nodes
+batch_size: 4
+accum_iter: 1
+
+# Datasets
+datasets:
+  train:
+    type: flat-wds
+    url: datasets/hcp-flat/hcp-flat_{0000..0009}.tar
+    clipping: random
+    shuffle: true
+    samples_per_epoch: 256
+
+  val_train:
+    type: flat-clips
+    root: datasets/flat-clips/hcp-train-task-clips-16t
+    shuffle: false
+
+  val_hcp:
+    type: flat-clips
+    root: datasets/flat-clips/hcp-train-task-clips-16t
+    shuffle: false
+
+  val_nsd:
+    type: flat-clips
+    root: datasets/flat-clips/nsd-train-task-clips-16t
+    shuffle: false
+
+# Data loader
+num_workers: 4
+
+wandb: false
+debug: true
+device: cuda

@@ -186,7 +186,6 @@ def main(args: DictConfig):
         if args.output_dir and (
             epoch % args.checkpoint_period == 0
             or epoch + 1 == args.epochs
-            or args.debug
         ):
             checkpoint_path = misc.save_model(
                 args=args,
@@ -224,9 +223,6 @@ def main(args: DictConfig):
         if log_plots and args.output_dir and misc.is_main_process():
             for plot_name, img in log_plots.items():
                 img.save(f"{args.output_dir}/{plot_name}__{epoch:05}.png")
-
-        if args.debug:
-            break
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
