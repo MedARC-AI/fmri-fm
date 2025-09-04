@@ -294,10 +294,12 @@ class MaskedAutoencoderLinear(nn.Module):
         return loss, pred, mask, decoder_mask
 
     @torch.no_grad()
-    def forward_masked_recon(self, imgs, pred, mask, img_mask=None):
+    def forward_masked_recon(self, imgs, pred, mask, img_mask=None, normalize=False):
         # imgs: [N, C, T, H, W]
         # pred: [N, t*h*w, u*p*p*C]
         # mask: [N, t*h*w], 0 is keep, 1 is remove,
+        assert not normalize, "target normalization not implemented"
+
         N, C, T, H, W = imgs.shape
         t_step = self.t_patch_size // self.t_pred_patch_size
         t_indices = torch.arange(0, T, t_step, device=imgs.device)

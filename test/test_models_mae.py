@@ -158,3 +158,29 @@ def test_mae_t_patch_indices(
     assert not torch.isnan(loss)
 
     model.forward_masked_recon(x, pred, mask, img_mask)
+
+
+@pytest.mark.parametrize(
+    "target_norm,recon_normalize",
+    [
+        ("none", False),
+        ("global", False),
+        ("frame", False),
+        ("patch", False),
+        ("global", True),
+    ],
+)
+def test_mae_target_norm(target_norm: str, recon_normalize: bool):
+    T, H, W = 16, 224, 224
+    x = torch.randn(2, 3, T, H, W)
+    img_mask = torch.zeros(H, W)
+    img_mask[18 : H - 18, 18 : W - 18] = 1
+
+    model = mae_vit_tiny_patch16(
+        target_norm=target_norm,
+    )
+
+    loss, pred, mask, decoder_mask = model.forward(x, img_mask=img_mask)
+    assert not torch.isnan(loss)
+
+    model.forward_masked_recon(x, pred, mask, img_mask, normalize=recon_normalize)

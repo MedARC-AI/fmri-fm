@@ -213,7 +213,13 @@ def evaluate(
     visible_mask = example_data["visible_mask"]
 
     target, _, _, im_masked, im_paste, img_mask = (
-        model_without_ddp.forward_masked_recon(samples, pred, mask, img_mask=img_mask)
+        model_without_ddp.forward_masked_recon(
+            samples,
+            pred,
+            mask,
+            img_mask=img_mask,
+            normalize=args.normalize_recon,
+        )
     )
     mask_pred_fig = vis.plot_mask_pred(target, im_masked, im_paste, img_mask=img_mask)
     mask_pred_img = vis.fig2pil(mask_pred_fig)

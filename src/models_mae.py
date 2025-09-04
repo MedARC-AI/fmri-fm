@@ -36,7 +36,7 @@ class MaskedAutoencoderViT(nn.Module):
         decoder_num_heads=16,
         mlp_ratio=4.0,
         norm_layer=nn.LayerNorm,
-        norm_pix_loss=False,
+        target_norm="none",
         num_frames=16,
         t_patch_size=4,
         t_pred_patch_size=None,
@@ -181,7 +181,7 @@ class MaskedAutoencoderViT(nn.Module):
             bias=True,
         )
 
-        self.norm_pix_loss = norm_pix_loss
+        self.target_norm = target_norm
 
         self.initialize_weights()
 
@@ -499,17 +499,18 @@ class MaskedAutoencoderViT(nn.Module):
         target = torch.index_select(imgs, 2, self.t_pred_indices)
         target = self.patchify(target)
 
-        if self.norm_pix_loss:
-            mean = target.mean(dim=-1, keepdim=True)
-            var = target.var(dim=-1, keepdim=True)
-            target = (target - mean) / (var + 1.0e-6) ** 0.5
+        if img_mask is not None:
+            img_mask = torch.index_select(img_mask, 2, self.t_pred_indices)
+            img_mask_patches = self.patchify(img_mask)
+        else:
+            img_mask_patches = None
+
+        target = self.normalize(target, img_mask_patches)
 
         loss = (pred - target) ** 2
 
         # exclude invalid pixels from loss
         if img_mask is not None:
-            img_mask = torch.index_select(img_mask, 2, self.t_pred_indices)
-            img_mask_patches = self.patchify(img_mask)
             # [N, L, D] mask of valid pixels to compute loss over
             mask = mask.unsqueeze(-1) * img_mask_patches
         else:
@@ -517,6 +518,55 @@ class MaskedAutoencoderViT(nn.Module):
 
         loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
         return loss
+
+    def normalize(self, target, mask):
+        # apply target normalization
+        # target: [N, L, D]
+        # mask: [N, L, D]
+        if self.target_norm in {None, "none"}:
+            self.norm_info = None
+            return target
+
+        N, L, D = target.shape
+        T = self.patch_embed.t_grid_size
+        H, W = self.patch_embed.grid_size
+
+        target = target.reshape(N, T, H * W, D)
+        mask = mask.reshape(N, T, H * W, D)
+
+        # normalize over:
+        #   - global: full spatiotemporal sequence
+        #   - frame: each temporal "framelet" (number of true frames = t_pred_patch_size)
+        #   - patch: each patch "tubelet"
+        dim = {"global": (1, 2, 3), "frame": (2, 3), "patch": 3}[self.target_norm]
+
+        mask_count = mask.sum(dim=dim, keepdim=True).clip(min=1)
+        mean = (mask * target).sum(dim=dim, keepdim=True) / mask_count
+        var = (mask * (target - mean) ** 2).sum(dim=dim, keepdim=True) / mask_count
+        std = (var + 1.0e-6) ** 0.5
+
+        target = mask * (target - mean) / std
+        target = target.reshape(N, L, D)
+
+        self.norm_info = (mask, mean, std)
+        return target
+
+    def unnormalize(self, pred):
+        # pred: [N, L, D]
+        if self.target_norm in {None, "none"}:
+            return pred
+
+        N, L, D = pred.shape
+        T = self.patch_embed.t_grid_size
+        H, W = self.patch_embed.grid_size
+
+        mask, mean, std = self.norm_info
+
+        pred = pred.reshape(N, T, H * W, D)
+        pred = mask * (pred * std + mean)
+
+        pred = pred.reshape(N, L, D)
+        return pred
 
     def forward(
         self,
@@ -586,7 +636,7 @@ class MaskedAutoencoderViT(nn.Module):
         return cls_token, reg_tokens, latent
 
     @torch.no_grad()
-    def forward_masked_recon(self, imgs, pred, mask, img_mask=None):
+    def forward_masked_recon(self, imgs, pred, mask, img_mask=None, normalize=True):
         # imgs: [N, C, T, H, W]
         # pred: [N, t*h*w, u*p*p*C]
         # mask: [N, t*h*w], 0 is keep, 1 is remove,
@@ -594,6 +644,12 @@ class MaskedAutoencoderViT(nn.Module):
         input = torch.index_select(imgs, 2, self.t_embed_indices)
         target = torch.index_select(imgs, 2, self.t_pred_indices)
 
+        # process the img_mask to match the target.
+        if img_mask is not None:
+            img_mask = img_mask.expand_as(imgs)
+            img_mask = torch.index_select(img_mask, 2, self.t_pred_indices)
+
+        # align input to target if the number of frames are not the same
         T_embed = input.shape[2]
         T_pred = target.shape[2]
         if T_embed != T_pred:
@@ -602,13 +658,23 @@ class MaskedAutoencoderViT(nn.Module):
             )
             input = torch.index_select(input, 2, t_sub_indices)
 
-        # this caches patch info for unpatchify
-        # necessary if batch size is different from training
-        self.patchify(target)
+        # this caches patch and normalization info for unpatchify and unnormalize
+        target_patches = self.patchify(target)
+        if img_mask is not None:
+            img_mask_patches = self.patchify(img_mask)
+        else:
+            img_mask_patches = None
+        # apply target normalization
+        target_patches = self.normalize(target_patches, img_mask_patches)
+
+        if normalize:
+            target = self.unpatchify(target_patches)
 
         input = torch.einsum("ncthw->nthwc", input)
         target = torch.einsum("ncthw->nthwc", target)
 
+        if not normalize:
+            pred = self.unnormalize(pred)
         pred = self.unpatchify(pred)
         pred = torch.einsum("ncthw->nthwc", pred)
 
@@ -627,10 +693,8 @@ class MaskedAutoencoderViT(nn.Module):
         # MAE reconstruction pasted with visible patches
         im_paste = target * (1 - mask) + pred * mask
 
-        # process the img_mask to match the target.
+        # drop channels dim for mask
         if img_mask is not None:
-            img_mask = img_mask.expand_as(imgs)
-            img_mask = torch.index_select(img_mask, 2, self.t_pred_indices)
             img_mask = img_mask[:, 0]  # (N, T, H, W)
 
         return target, pred, mask, im_masked, im_paste, img_mask

@@ -78,6 +78,16 @@ init_decoder_scale: null
 # correct for the number of observed pixels in the patch embedding
 mask_patch_embed: false
 
+# target normalization, as in MAE
+#   - none: no target normalization
+#   - global: full spatiotemporal sequence
+#   - frame: each temporal "framelet" (number of true frames = t_pred_patch_size)
+#   - patch: each patch "tubelet" (same as MAE)
+target_norm: none
+# make reconstruction plots with normalized targets. otherwise, the normalized
+# predictions are un-normalized using the scale and offset from the targets.
+normalize_recon: false
+
 # Optimization
 epochs: 100
 # batch size per gpu, so total_batch_size = batch_size * num_gpus_per_node * num_nodes
