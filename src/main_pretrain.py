@@ -232,12 +232,8 @@ def main(args: DictConfig):
 
 
 def make_data_loaders(args: DictConfig):
-    transform = make_flat_transform(
-        clip_vmax=args.clip_vmax,
-        normalize=args.normalize,
-        masking=args.masking,
-        masking_kwargs=args.masking_kwargs,
-    )
+    crop_kwargs = args.crop_kwargs.copy()
+    crop_kwargs["size"] = args.img_size
 
     data_loaders = {}
     samplers = {}
@@ -245,6 +241,19 @@ def make_data_loaders(args: DictConfig):
 
     for dataset_name, dataset_config in args.datasets.items():
         print(f"dataset: {dataset_name}\n\n{OmegaConf.to_yaml(dataset_config)}")
+
+        # apply crop transform both to 'train', as well as any "eval" datasets with
+        # train in the name.
+        random_crop = args.random_crop and "train" in dataset_name
+
+        transform = make_flat_transform(
+            clip_vmax=args.clip_vmax,
+            normalize=args.normalize,
+            bbox=args.bbox,
+            crop_kwargs=crop_kwargs if random_crop else None,
+            masking=args.masking,
+            masking_kwargs=args.masking_kwargs,
+        )
 
         dataset_type = dataset_config.pop("type")
 

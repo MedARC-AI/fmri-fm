@@ -7,7 +7,9 @@ from typing import Any, Callable, Iterable, Literal
 
 import numpy as np
 import torch
-import torchvision.transforms.functional as TF
+import torchvision.transforms.v2 as v2
+import torchvision.transforms.v2.functional as TF
+import torchvision.tv_tensors as tvt
 import scipy.sparse
 import webdataset as wds
 from torch.utils.data import Dataset
@@ -238,6 +240,8 @@ def make_select_files(select_files_pattern: str) -> Callable[[str], bool]:
 def make_flat_transform(
     clip_vmax: float | None = 3.0,
     normalize: Literal["global", "frame"] | None = None,
+    bbox: tuple[int, int, int, int] | None = None,
+    crop_kwargs: dict[str, Any] | None = None,
     masking: str | None = None,
     masking_kwargs: dict[str, Any] | None = None,
     target_id_map: dict[str, int] | str | Path | None = None,
@@ -245,10 +249,23 @@ def make_flat_transform(
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
     """Make sample transform for flat map data.
 
-    If `normalize='global'`, globally normalizes the clip to mean zero unit variance. If
-    `normalize='frame'`, each temporal is independently normalized. fMRI time series
-    have slow global variation. By normalizing, we can remove some of this.
+    Args:
+        clip_vmax: max abs value to clip at
+        normalize: If `normalize='global'`, globally normalizes the clip to mean zero
+            unit variance. If `normalize='frame'`, each temporal frame is independently
+            normalized.
+        bbox: fixed bounding box to crop inputs to, (x1, y1, x2, y2)
+        crop_kwargs: kwargs to pass to RandomResize
+        masking: type of structured masking to apply
+        masking_kwargs: kwargs to the mask generator
+        target_id_map: mapping from sample target key to targets
+        target_key: sample key for the prediction target
     """
+    if crop_kwargs:
+        crop_fn = v2.RandomResizedCrop(**crop_kwargs)
+    else:
+        crop_fn = None
+
     if masking:
         masking_kwargs = masking_kwargs or {}
         mask_fn = make_masking(masking, **masking_kwargs)
@@ -270,8 +287,16 @@ def make_flat_transform(
         image = sample["image"]
         image = torch.as_tensor(image).float()
 
-        # assume mask coded as zeros.
-        mask = image[0] != 0
+        # crop to fixed bbox
+        if bbox is not None:
+            x1, y1, x2, y2 = bbox
+            image = image[:, y1:y2, x1:x2]
+
+        # assume mask coded as zeros, and shared across time.
+        mask = (image[0] != 0).float()
+
+        if crop_fn is not None:
+            image, mask = crop_fn(image, tvt.Mask(mask))
 
         if norm_fn is not None:
             image = norm_fn(image, mask)
@@ -286,12 +311,9 @@ def make_flat_transform(
         else:
             visible_mask = None
 
-        # TODO: we may soon want to do cropping. to support this, could stack image with
-        # mask channel wise to apply crops and then chunk back after.
-
         # (C, T, H, W)
         image = image[None]
-        mask = mask[None, None].float()
+        mask = mask[None, None]
         if visible_mask is not None:
             visible_mask = visible_mask[None, None]
 

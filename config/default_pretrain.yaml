@@ -15,6 +15,7 @@ resume: null
 model: mae_vit_base_patch16
 
 # Standard image size of fmri flat datasets.
+# Used when creating the model for setting up the patch embedding and such.
 img_size: [224, 560]
 in_chans: 1
 
@@ -133,6 +134,19 @@ clip_vmax: 3.0
 # each clip is one way to try to get the model to focus on more interesting local
 # activity variation.
 normalize: null
+
+# cropping options
+# fixed bbox to crop to (inefficient hack for testing performance on interior crops)
+# note, if you set this, you should also update the img_size accordingly
+bbox: null
+# random resize crop for training only.
+random_crop: false
+# conservative default settings. scale 0.9 ~= loss of one patch on height and width.
+# keep original aspect ratio (560 / 224 = 2.5).
+crop_kwargs:
+  scale: [0.9, 1.0]
+  ratio: [2.5, 2.5]
+  interpolation: 3  # PIL interp constant, 2=BILINEAR, 3=BICUBIC
 
 # Data loader
 num_workers: 4
