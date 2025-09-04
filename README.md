@@ -60,8 +60,7 @@ The codebase follows a [flat organization](https://www.evandemond.com/programmin
 **Training scripts**
 
 - [`main_pretrain.py`](src/main_pretrain.py): Main foundation model pretraining script.
-- [`main_classification.py`](src/main_classification.py): Script for downstream classification evaluations.
-- [`main_regression.py`](src/main_regression.py): Script for downstream regression evaluations.
+- [`main_probe.py`](src/main_probe.py): Script for downstream classification and regression evaluations.
 
 **Models**
 

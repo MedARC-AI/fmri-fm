@@ -1,6 +1,11 @@
 # Name of the run. For output directory and wandb.
 name: hcp_pheno_regression
 
+# Prediction task
+#   - classification
+#   - regression
+task: regression
+
 # Description of the run. Goes in wandb notes.
 notes: null
 
@@ -21,55 +26,31 @@ resume: null
 model: mae_vit_base_patch16
 
 # Standard image size of fmri flat datasets.
+# Used when creating the model for setting up the patch embedding and such.
 img_size: [224, 560]
 in_chans: 1
 
-# Mask ratio
-# note that the number of visible patches is computed as
-#   len_keep = (T // t) * (H // h) * (W // w) * (1 - mask_ratio)
-# where (T, H, W) is the clip size and (t, h, w) is the patch size.
-#
-# so for image size (224, 560) we get the following patches per frame:
-#   - 0.75:  122
-#   - 0.804: 96
-#   - 0.869: 64
-#   - 0.9:   48
-#   - 0.96:  19
-#
-# for comparison, original MAE was trained with 0.75 on 224 x 224 (49 patches), while
-# MAE-st was trained with 0.9 (19 patches)
-mask_ratio: 0.9
-
-# decoder mask ratio for VideoMAEv2 style sparse decoding.
-decoder_mask_ratio: null
-
-# Constraints for the visible mask:
-#   - hemi: visible mask constrained to left or right hemisphere
-#   - inverse_block: visible bask is a local square block
-#   - hemi_inverse_block: visible bask is a square block constrained to one hemi
-# Default is unconstrained uniform masking.
-masking: null
-masking_kwargs:
-  # size of the visible block for inverse block masking.
-  # note this is intersected with the valid data mask, so not all pixels in the block
-  # will ultimately be visible. so should overestimate relative to the desired number of
-  # visible patches.
-  block_size: 160
-
 # Temporal config.
-# t_pred_patch_size controls how many input frames the decoder predicts. MAE-st default
-# is to just predict the first frame of each input temporal patch. Setting
-# t_pred_patch_size = t_patch_size predicts all input frames. t_pred_patch_size must
-# divide t_patch_size.
-#
-# setting num_frames = t_patch_size = t_pred_patch_size recovers standard MAE.
+# t_embed_patch_indices and t_pred_patch_indices define which frames from each patch are
+# encoded and decoded respectively. The options are:
+#   - null (encode/decode all frames in the patch)
+#   - a slice expression like '0:8', '0:None:2'
+#   - an explicit list of indices
 num_frames: 16
 t_patch_size: 16
-t_pred_patch_size: 8
+t_embed_patch_indices: null       # encode all frames
+t_pred_patch_indices: "0:None:2"  # decode every other frame
+
+# previous option to specify the temporal patch size of decoder, for backwards
+# compatibility.
+t_pred_patch_size: 1
 
 decoder_depth: 4
 sep_pos_embed: true
 cls_embed: true
+
+# correct for the number of observed pixels in the patch embedding
+mask_patch_embed: false
 
 init_decoder_scale: null
 
@@ -137,6 +118,9 @@ datasets:
 # Target ID map, if not already in the samples.
 target_id_map: datasets/hcp-phenotype/regression_target_id_map.json
 target_key: sub
+
+# Number of target classes for classification, or target dimension for regression.
+num_classes: 2
 
 # Names of regression targets
 target_names: [Sadness_Unadj, ReadEng_Unadj]

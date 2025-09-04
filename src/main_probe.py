@@ -21,7 +21,6 @@ from typing import Iterable
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 import wandb
 from omegaconf import DictConfig, OmegaConf
@@ -32,10 +31,10 @@ from webdataset import WebLoader as DataLoader
 
 import models_mae
 import models_mae_linear
-import models_classification
+import models_probe
 import util.lr_sched as lr_sched
 import util.misc as misc
-from models_classification import (
+from models_probe import (
     ClassificationWrapper,
     AttnPoolClassifier,
     LinearClassifier,
@@ -51,7 +50,7 @@ DEFAULT_CONFIG = Path(__file__).parents[1] / "config/default_classification.yaml
 MODELS_DICT = {
     **models_mae.__dict__,
     **models_mae_linear.__dict__,
-    **models_classification.__dict__,
+    **models_probe.__dict__,
 }
 
 
@@ -68,7 +67,7 @@ def main(args: DictConfig):
             config=OmegaConf.to_container(args),
         )
 
-    print("classification train/eval fmri-fm")
+    print("probe train/eval fmri-fm")
     print("job dir: {}".format(os.path.dirname(os.path.realpath(__file__))))
     print(misc.get_sha())
     print("config:", OmegaConf.to_yaml(args), sep="\n")
@@ -123,7 +122,11 @@ def main(args: DictConfig):
     if args.checkpoint:
         print(f"loading checkpoint: {args.checkpoint}")
         checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
-        backbone.load_state_dict(checkpoint["model"])
+        missing_keys, unexpected_keys = backbone.load_state_dict(
+            checkpoint["model"], strict=False
+        )
+        print(f"{missing_keys=}, {unexpected_keys=}")
+        assert set(missing_keys).issubset({"t_pred_indices", "t_embed_indices"})
 
     if not args.finetune:
         print("freezing backbone model")
@@ -261,7 +264,7 @@ def main(args: DictConfig):
                 print(json.dumps(log_stats), file=f)
 
         best_scores, best_hparams = get_best_classifiers(
-            model_without_ddp, eval_stats[val_ds_name]
+            model_without_ddp, eval_stats[val_ds_name], args
         )
 
         # log the best classifiers
@@ -330,6 +333,7 @@ def make_data_loaders(args: DictConfig):
     total_num_batches = {}
 
     transform = make_flat_transform(
+        img_size=args.img_size,
         clip_vmax=args.clip_vmax,
         normalize=args.normalize,
         target_id_map=args.target_id_map,
@@ -476,9 +480,17 @@ def train_one_epoch(
     debug_steps = 10 * args.accum_iter
     log_wandb = misc.is_main_process() and log_wandb
 
+    if args.task == "classification":
+        criterion = nn.CrossEntropyLoss(reduction="none")
+    elif args.task == "regression":
+        criterion = nn.MSELoss(reduction="none")
+    else:
+        raise ValueError(f"unknown task {args.task}")
+
     model_without_ddp = model.module if args.distributed else model
     classifier_keys = model_without_ddp.classifier_keys
     clf_key_to_idx = {key: ii for ii, key in enumerate(classifier_keys)}
+    num_classifiers = len(classifier_keys)
 
     if log_classifier_keys is None:
         log_classifier_keys = {}
@@ -510,21 +522,30 @@ def train_one_epoch(
         img_mask = img_mask.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
 
+        # handle single target regression
+        if args.task == "regression" and target.ndim == 1:
+            target = target[:, None]
+
         with torch.autocast(device_type=device.type, enabled=not fp32):
             # TODO: capi does not do amp. is there a reason? is amp usually not done
             # during linear probe?
-            all_logit = model(samples, img_mask=img_mask)
-            all_loss = F.cross_entropy(
-                all_logit,
-                target.unsqueeze(-1).expand(
-                    -1, all_logit.shape[-1]
-                ),  # [B, num_classifiers]
-                reduction="none",
-            ).mean(dim=0)  # [num_classifiers]
+            all_pred = model(samples, img_mask=img_mask)
+
+            # expand last dimension of target to match prediction
+            expand_shape = target.ndim * (-1,) + (num_classifiers,)
+            all_target = target.unsqueeze(-1).expand(*expand_shape)
+            # [num_classifiers] or [num_targets, num_classifiers]
+            all_loss = criterion(all_pred, all_target).mean(dim=0)
             loss = all_loss.mean()
 
         loss_value = misc.all_reduce_mean(loss.detach()).item()
-        all_loss_values = misc.all_reduce_mean(all_loss.detach()).tolist()
+        all_loss_values = misc.all_reduce_mean(all_loss.detach()).cpu().numpy()
+
+        # reduce over number of targets
+        if all_loss_values.ndim == 2:
+            mean_loss_values = all_loss_values.mean(axis=0)
+        else:
+            mean_loss_values = all_loss_values
 
         if not math.isfinite(loss_value):
             raise Exception("Loss is {}, stopping training".format(loss_value))
@@ -543,11 +564,13 @@ def train_one_epoch(
         torch.cuda.synchronize()
 
         metric_logger.update(loss=loss_value)
+
         log_loss_dict = {
-            f"loss_{key[0]}": all_loss_values[clf_key_to_idx[key]]
+            f"loss_{key[0]}": mean_loss_values[clf_key_to_idx[key]]
             for key in log_classifier_keys.items()
         }
         metric_logger.update(**log_loss_dict)
+
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)
         metric_logger.update(gpu_mem=misc.gpu_mem_usage())
@@ -562,6 +585,7 @@ def train_one_epoch(
             epoch_1000x = int((data_iter_step / num_batches + epoch) * 1000)
             log_stats = {
                 "train/loss": loss_value,
+                "train/lr": lr,
                 **{f"train/{k}": v for k, v in log_loss_dict.items()},
             }
             wandb.log(log_stats, step=epoch_1000x)
@@ -595,9 +619,17 @@ def evaluate(
     debug_steps = 10
     log_wandb = misc.is_main_process() and log_wandb
 
+    if args.task == "classification":
+        criterion = nn.CrossEntropyLoss(reduction="none")
+    elif args.task == "regression":
+        criterion = nn.MSELoss(reduction="none")
+    else:
+        raise ValueError(f"unknown task {args.task}")
+
     model_without_ddp = model.module if args.distributed else model
     classifier_keys = model_without_ddp.classifier_keys
     clf_key_to_idx = {key: ii for ii, key in enumerate(classifier_keys)}
+    num_classifiers = len(classifier_keys)
 
     all_meters = defaultdict(misc.SmoothedValue)
 
@@ -620,39 +652,64 @@ def evaluate(
         img_mask = img_mask.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
 
+        # handle single target regression
+        if args.task == "regression" and target.ndim == 1:
+            target = target[:, None]
+
         with torch.autocast(device_type=device.type, enabled=not fp32):
-            all_logit = model(samples, img_mask=img_mask)
-            all_loss = F.cross_entropy(
-                all_logit,
-                target.unsqueeze(-1).expand(
-                    -1, all_logit.shape[-1]
-                ),  # [B, num_classifiers]
-                reduction="none",
-            ).mean(dim=0)  # [num_classifiers]
+            all_pred = model(samples, img_mask=img_mask)
+
+            # expand last dimension of target to match prediction
+            expand_shape = target.ndim * (-1,) + (num_classifiers,)
+            all_target = target.unsqueeze(-1).expand(*expand_shape)
+
+            # [num_classifiers] or [num_targets, num_classifiers]
+            all_loss = criterion(all_pred, all_target).mean(dim=0)
             loss = all_loss.mean()
 
         loss_value = loss.item()
         metric_logger.update(loss=loss_value)
 
-        all_loss_values = all_loss.tolist()
-        all_acc1_values = [
-            accuracy(all_logit.detach()[..., ii], target)[0].item()
-            for ii in range(all_logit.shape[-1])
-        ]
+        all_loss_values = all_loss.detach().cpu().numpy()
+
+        # reduce over number of targets
+        if all_loss_values.ndim == 2:
+            mean_loss_values = all_loss_values.mean(axis=0)
+        else:
+            mean_loss_values = all_loss_values
+
+        if args.task == "classification":
+            all_acc1_values = [
+                accuracy(all_pred[..., ii], target)[0].item()
+                for ii in range(num_classifiers)
+            ]
 
         for ii, key in enumerate(classifier_keys):
             fmt_key = format_clf_key(key)
-            all_meters[f"loss_{fmt_key}"].update(all_loss_values[ii])
-            all_meters[f"acc1_{fmt_key}"].update(all_acc1_values[ii])
+            all_meters[f"loss_{fmt_key}"].update(mean_loss_values[ii])
 
+            if args.task == "classification":
+                all_meters[f"acc1_{fmt_key}"].update(all_acc1_values[ii])
+
+            if args.target_names:
+                for jj, target_name in enumerate(args.target_names):
+                    k = f"loss_{target_name}_{fmt_key}"
+                    all_meters[k].update(all_loss_values[jj, ii])
+
+        log_metric_dict = {}
         for feature_source, hparam in log_classifier_keys.items():
             idx = clf_key_to_idx[(feature_source, hparam)]
-            metric_logger.update(
-                **{
-                    f"loss_{feature_source}": all_loss_values[idx],
-                    f"acc1_{feature_source}": all_acc1_values[idx],
-                }
-            )
+            log_metric_dict[f"loss_{feature_source}"] = mean_loss_values[idx]
+
+            if args.task == "classification":
+                log_metric_dict[f"acc1_{feature_source}"] = all_acc1_values[idx]
+
+            if args.target_names:
+                for jj, target_name in enumerate(args.target_names):
+                    k = f"loss_{target_name}_{feature_source}"
+                    log_metric_dict[k] = all_loss_values[jj, idx]
+
+        metric_logger.update(**log_metric_dict)
 
         if args.debug and (data_iter_step + 1) >= debug_steps:
             break
@@ -684,13 +741,16 @@ def format_clf_key(key: tuple[str, tuple[float, float]]) -> str:
 def get_best_classifiers(
     model: "ClassificationWrapper",
     val_stats: dict[str, float],
-    metric: str = "acc1",
+    args: DictConfig,
 ):
     val_scores = defaultdict(list)
     clf_hparams = defaultdict(list)
     for key in model.classifier_keys:
         feature_source, hparam = key
-        score = val_stats[f"{metric}_{format_clf_key(key)}"]
+        if args.task == "classification":
+            score = val_stats[f"acc1_{format_clf_key(key)}"]
+        else:
+            score = 1 - val_stats[f"loss_{format_clf_key(key)}"]
         val_scores[feature_source].append(score)
         clf_hparams[feature_source].append(hparam)
 
