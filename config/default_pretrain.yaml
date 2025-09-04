@@ -39,6 +39,7 @@ mask_ratio: 0.9
 decoder_mask_ratio: null
 
 # Constraints for the visible mask:
+#   - tube: patch tube masking, as in VideoMAE
 #   - hemi: visible mask constrained to left or right hemisphere
 #   - inverse_block: visible bask is a local square block
 #   - hemi_inverse_block: visible bask is a square block constrained to one hemi

@@ -279,12 +279,16 @@ class MaskedAutoencoderViT(nn.Module):
         """
         N, L, D = x.shape  # batch, length, dim
 
-        # mask ratio is relative to the (minimum) size of the visible mask
+        # mask ratio is relative to the total number of patches, regardless of the
+        # visible mask. this way, we get a consistent number of observed patches.
+        # nb, old configs use a mask ratio that is relative to the number of visible
+        # patches, so this would need to be adjusted.
+        len_keep = int(L * (1 - mask_ratio))
+
+        # adjust for number of visible patches
         if visible_patch_mask is not None:
-            total_patches = visible_patch_mask.sum(dim=1).min().item()
-        else:
-            total_patches = L
-        len_keep = int(total_patches * (1 - mask_ratio))
+            total_patches = int(visible_patch_mask.sum(dim=1).min().item())
+            len_keep = min(len_keep, total_patches)
 
         noise = torch.rand(
             N, L, device=x.device, generator=generator

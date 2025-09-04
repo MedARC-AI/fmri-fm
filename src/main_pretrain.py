@@ -232,8 +232,10 @@ def main(args: DictConfig):
 
 
 def make_data_loaders(args: DictConfig):
-    crop_kwargs = args.crop_kwargs.copy()
-    crop_kwargs["size"] = args.img_size
+    masking_kwargs = args.masking_kwargs.copy()
+    if args.masking == "tube":
+        masking_kwargs["mask_ratio"] = args.mask_ratio
+        masking_kwargs["patch_size"] = args.patch_size
 
     data_loaders = {}
     samplers = {}
@@ -247,12 +249,14 @@ def make_data_loaders(args: DictConfig):
         random_crop = args.random_crop and "train" in dataset_name
 
         transform = make_flat_transform(
+            img_size=args.img_size,
             clip_vmax=args.clip_vmax,
             normalize=args.normalize,
             bbox=args.bbox,
-            crop_kwargs=crop_kwargs if random_crop else None,
+            random_crop=random_crop,
+            crop_kwargs=args.crop_kwargs,
             masking=args.masking,
-            masking_kwargs=args.masking_kwargs,
+            masking_kwargs=masking_kwargs,
         )
 
         dataset_type = dataset_config.pop("type")

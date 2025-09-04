@@ -12,6 +12,7 @@ import torchvision.transforms.v2.functional as TF
 import torchvision.tv_tensors as tvt
 import scipy.sparse
 import webdataset as wds
+from einops import rearrange
 from torch.utils.data import Dataset
 
 
@@ -238,9 +239,11 @@ def make_select_files(select_files_pattern: str) -> Callable[[str], bool]:
 
 
 def make_flat_transform(
+    img_size: tuple[int, int] | None = None,
     clip_vmax: float | None = 3.0,
     normalize: Literal["global", "frame"] | None = None,
     bbox: tuple[int, int, int, int] | None = None,
+    random_crop: bool = False,
     crop_kwargs: dict[str, Any] | None = None,
     masking: str | None = None,
     masking_kwargs: dict[str, Any] | None = None,
@@ -250,19 +253,22 @@ def make_flat_transform(
     """Make sample transform for flat map data.
 
     Args:
+        img_size: target image size. If input image doesn't match target size, it will
+            be padded around the edges.
         clip_vmax: max abs value to clip at
         normalize: If `normalize='global'`, globally normalizes the clip to mean zero
             unit variance. If `normalize='frame'`, each temporal frame is independently
             normalized.
         bbox: fixed bounding box to crop inputs to, (x1, y1, x2, y2)
-        crop_kwargs: kwargs to pass to RandomResize
+        random_crop: enable random resize crop augmentation
+        crop_kwargs: kwargs to pass to RandomResizeCrop
         masking: type of structured masking to apply
         masking_kwargs: kwargs to the mask generator
         target_id_map: mapping from sample target key to targets
         target_key: sample key for the prediction target
     """
-    if crop_kwargs:
-        crop_fn = v2.RandomResizedCrop(**crop_kwargs)
+    if random_crop:
+        crop_fn = v2.RandomResizedCrop(size=img_size, **crop_kwargs)
     else:
         crop_fn = None
 
@@ -291,6 +297,9 @@ def make_flat_transform(
         if bbox is not None:
             x1, y1, x2, y2 = bbox
             image = image[:, y1:y2, x1:x2]
+
+        # pad to a fixed size (that is divisible by patch size)
+        image = pad_to_size(image, img_size)
 
         # assume mask coded as zeros, and shared across time.
         mask = (image[0] != 0).float()
@@ -330,6 +339,50 @@ def make_flat_transform(
         return sample
 
     return transform
+
+
+def tube_masking(
+    mask: torch.Tensor,
+    *,
+    mask_ratio: float,
+    patch_size: int,
+):
+    H, W = mask.shape
+
+    mask_patches = rearrange(
+        mask,
+        "(h p) (w q) -> (h w) (p q)",
+        h=H // patch_size,
+        w=W // patch_size,
+        p=patch_size,
+        q=patch_size,
+    )
+    L, D = mask_patches.shape
+
+    patch_mask = mask_patches.sum(dim=-1).clip(max=1)
+
+    len_keep = int((1 - mask_ratio) * L)
+    total_patches = int(patch_mask.sum().item())
+    len_keep = min(len_keep, total_patches)
+
+    noise = torch.rand(L, device=mask.device)
+    # shift patches outside of mask to not be selected
+    noise = noise + (1 - patch_mask)
+
+    ids_shuffle = torch.argsort(noise)
+    ids_keep = ids_shuffle[:len_keep]
+
+    visible_mask_patches = torch.zeros_like(mask_patches)
+    visible_mask_patches[ids_keep] = 1
+    visible_mask = rearrange(
+        visible_mask_patches,
+        "(h w) (p q) -> (h p) (w q)",
+        h=H // patch_size,
+        w=W // patch_size,
+        p=patch_size,
+        q=patch_size,
+    )
+    return visible_mask
 
 
 def hemi_masking(mask: torch.Tensor) -> torch.Tensor:
@@ -388,6 +441,7 @@ def hemi_inverse_block_masking(
 #     then decide which of the four box corners it is to maximize overlap.
 
 MASKING_REGISTRY = {
+    "tube": tube_masking,
     "hemi": hemi_masking,
     "inverse_block": inverse_block_masking,
     "hemi_inverse_block": hemi_inverse_block_masking,
@@ -412,10 +466,13 @@ def apply_normalize(
     return image
 
 
-def pad_to_multiple(img: torch.Tensor, patch_size: int) -> torch.Tensor:
+def pad_to_size(img: torch.Tensor, size: tuple[int, int]) -> torch.Tensor:
     H, W = img.shape[-2:]
-    pad_h = (patch_size - H % patch_size) % patch_size
-    pad_w = (patch_size - W % patch_size) % patch_size
+    H_new, W_new = size
+    pad_h = max(H_new - H, 0)
+    pad_w = max(W_new - W, 0)
+    if pad_h == pad_w == 0:
+        return img
     padding = (pad_w // 2, pad_h // 2, pad_w - pad_w // 2, pad_h - pad_h // 2)
     img = TF.pad(img, padding)
     return img

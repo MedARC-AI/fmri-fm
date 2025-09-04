@@ -1,6 +1,7 @@
 import pytest
 import torch
 import torch.nn.functional as F
+from einops import rearrange
 
 import flat_data
 
@@ -11,6 +12,28 @@ def dummy_mask() -> torch.Tensor:
     mask = F.pad(mask, (4, 4, 4, 4))
     mask = torch.cat([mask, mask], dim=-1)
     return mask
+
+
+def test_tube_masking(dummy_mask: torch.Tensor):
+    visible_mask = flat_data.tube_masking(dummy_mask, mask_ratio=0.75, patch_size=4)
+    H, W = visible_mask.shape
+    # check expected mask ratio
+    assert visible_mask.sum() == (H * W / 4)
+
+    # check that each patch is all or none
+    visible_mask_patches = rearrange(
+        visible_mask,
+        "(h p) (w q) -> (h w) (p q)",
+        h=6,
+        w=12,
+        p=4,
+        q=4,
+    )
+    count = visible_mask_patches.mean(dim=1)
+    assert torch.allclose(count, torch.round(count))
+
+    # check that observed patches are inside the data mask
+    assert (visible_mask * (1 - dummy_mask)).sum() == 0.0
 
 
 def test_hemi_masking(dummy_mask: torch.Tensor):
@@ -41,9 +64,9 @@ def test_hemi_inverse_block_masking(dummy_mask: torch.Tensor):
     assert visible_mask.sum() == 64
 
 
-def test_pad_to_multiple():
+def test_pad_to_size():
     img = torch.ones(3, 1, 12, 14)
-    img = flat_data.pad_to_multiple(img, 16)
+    img = flat_data.pad_to_size(img, (16, 16))
     H, W = img.shape[-2:]
     assert H, W == (16, 16)
 
