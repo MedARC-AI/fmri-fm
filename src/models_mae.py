@@ -11,6 +11,7 @@
 # MAE-st: https://github.com/facebookresearch/mae_st
 # --------------------------------------------------------
 
+import ast
 from functools import partial
 
 import torch
@@ -38,7 +39,7 @@ class MaskedAutoencoderViT(nn.Module):
         norm_pix_loss=False,
         num_frames=16,
         t_patch_size=4,
-        t_pred_patch_size=1,
+        t_pred_patch_size=None,
         patch_embed=video_vit.PatchEmbed,
         no_qkv_bias=False,
         sep_pos_embed=False,
@@ -48,6 +49,8 @@ class MaskedAutoencoderViT(nn.Module):
         no_cls_pos=False,
         init_decoder_scale=None,
         mask_patch_embed=False,
+        t_embed_patch_indices=None,
+        t_pred_patch_indices="0:None:4",
         **kwargs,
     ):
         super().__init__()
@@ -57,17 +60,35 @@ class MaskedAutoencoderViT(nn.Module):
         self.reg_tokens = reg_tokens
         self.no_cls_pos = no_cls_pos
         self.init_decoder_scale = init_decoder_scale
-        self.t_pred_patch_size = t_pred_patch_size
         self.mask_patch_embed = mask_patch_embed
-        assert t_patch_size % t_pred_patch_size == 0
+
+        # we have the option to encode/decode arbitrary subset of frames in each patch
+        # first get the within-patch indices for the encoder (embed) and decoder (pred)
+        # the indices can be a list or slice expression like '0:8' or '0:None:2'
+        t_embed_patch_indices = _parse_indices(t_embed_patch_indices, t_patch_size)
+        # fall back to t_pred_patch_size for backwards compatibility.
+        if t_pred_patch_indices is None and t_pred_patch_size:
+            t_step = t_patch_size // t_pred_patch_size
+            t_pred_patch_indices = list(range(0, t_patch_size, t_step))
+        t_pred_patch_indices = _parse_indices(t_pred_patch_indices, t_patch_size)
+        # encoder and decoder patch size
+        self.t_embed_patch_size = len(t_embed_patch_indices)
+        self.t_pred_patch_size = len(t_pred_patch_indices)
+        # repeat with offsets to get selection indices for the full sequence
+        t_num_patches = num_frames // t_patch_size
+        t_patch_offsets = t_patch_size * torch.arange(t_num_patches)
+        t_embed_indices = (t_patch_offsets[:, None] + t_embed_patch_indices).flatten()
+        t_pred_indices = (t_patch_offsets[:, None] + t_pred_patch_indices).flatten()
+        self.register_buffer("t_embed_indices", t_embed_indices)
+        self.register_buffer("t_pred_indices", t_pred_indices)
 
         self.patch_embed = patch_embed(
             img_size,
             patch_size,
             in_chans,
             embed_dim,
-            num_frames,
-            t_patch_size,
+            len(t_embed_indices),
+            self.t_embed_patch_size,
         )
         num_patches = self.patch_embed.num_patches
         input_size = self.patch_embed.input_size
@@ -223,7 +244,7 @@ class MaskedAutoencoderViT(nn.Module):
         """
         N, C, T, H, W = imgs.shape
         ph, pw = self.patch_embed.patch_size
-        u = self.t_pred_patch_size if predict else self.patch_embed.t_patch_size
+        u = self.t_pred_patch_size if predict else self.t_embed_patch_size
         assert H % ph == 0 and W % pw == 0 and T % u == 0
         h = H // ph
         w = W // pw
@@ -352,7 +373,11 @@ class MaskedAutoencoderViT(nn.Module):
         x: [N, C, T, H, W]
         visible_mask: [N, C, T, H, W] mask of visible pixels, 1=visible, 0=not visible
         """
+        # select frames to encode
+        x = torch.index_select(x, 2, self.t_embed_indices)
+
         if visible_mask is not None:
+            visible_mask = torch.index_select(visible_mask, 2, self.t_embed_indices)
             # mask invisible part of x with zeros.
             x = visible_mask * x
             # [N, L] mask of patches containing some visible pixels
@@ -414,6 +439,7 @@ class MaskedAutoencoderViT(nn.Module):
 
             # don't decode patches outside of img mask
             if img_mask is not None:
+                img_mask = torch.index_select(img_mask, 2, self.t_embed_indices)
                 img_patch_mask = self.patchify(img_mask, predict=False)
                 img_patch_mask = img_patch_mask.sum(dim=-1).clip(max=1)
                 decoder_patch_mask = img_patch_mask * decoder_patch_mask
@@ -465,16 +491,10 @@ class MaskedAutoencoderViT(nn.Module):
         mask: [N, t*h*w], 0 is keep, 1 is remove,
         img_mask: [N, C, T, H, W], 0 is invalid, 1 is valid
         """
-        # nb, change here vs mae_st reference.
-        # fixed the index selection to take the first frame from each temporal patch as
-        # the target in the default case t_pred_patch_size = 1. also should now work for
-        # any t_pred_patch_size that divides t_patch_size.
         N, C, T, H, W = imgs.shape
-        t_step = self.patch_embed.t_patch_size // self.t_pred_patch_size
-        t_indices = torch.arange(0, T, t_step, device=imgs.device)
-        _imgs = torch.index_select(imgs, 2, t_indices)
+        target = torch.index_select(imgs, 2, self.t_pred_indices)
+        target = self.patchify(target)
 
-        target = self.patchify(_imgs)
         if self.norm_pix_loss:
             mean = target.mean(dim=-1, keepdim=True)
             var = target.var(dim=-1, keepdim=True)
@@ -484,7 +504,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         # exclude invalid pixels from loss
         if img_mask is not None:
-            img_mask = torch.index_select(img_mask, 2, t_indices)
+            img_mask = torch.index_select(img_mask, 2, self.t_pred_indices)
             img_mask_patches = self.patchify(img_mask)
             # [N, L, D] mask of valid pixels to compute loss over
             mask = mask.unsqueeze(-1) * img_mask_patches
@@ -567,14 +587,22 @@ class MaskedAutoencoderViT(nn.Module):
         # pred: [N, t*h*w, u*p*p*C]
         # mask: [N, t*h*w], 0 is keep, 1 is remove,
         N, C, T, H, W = imgs.shape
-        t_step = self.patch_embed.t_patch_size // self.t_pred_patch_size
-        t_indices = torch.arange(0, T, t_step, device=imgs.device)
-        target = torch.index_select(imgs, 2, t_indices)
+        input = torch.index_select(imgs, 2, self.t_embed_indices)
+        target = torch.index_select(imgs, 2, self.t_pred_indices)
+
+        T_embed = input.shape[2]
+        T_pred = target.shape[2]
+        if T_embed != T_pred:
+            t_sub_indices = (
+                torch.linspace(0, T_embed - 1, T_pred).long().to(input.device)
+            )
+            input = torch.index_select(input, 2, t_sub_indices)
 
         # this caches patch info for unpatchify
         # necessary if batch size is different from training
         self.patchify(target)
 
+        input = torch.einsum("ncthw->nthwc", input)
         target = torch.einsum("ncthw->nthwc", target)
 
         pred = self.unpatchify(pred)
@@ -590,7 +618,7 @@ class MaskedAutoencoderViT(nn.Module):
         mask = torch.einsum("ncthw->nthwc", mask)
 
         # masked image
-        im_masked = target * (1 - mask)
+        im_masked = input * (1 - mask)
 
         # MAE reconstruction pasted with visible patches
         im_paste = target * (1 - mask) + pred * mask
@@ -598,10 +626,31 @@ class MaskedAutoencoderViT(nn.Module):
         # process the img_mask to match the target.
         if img_mask is not None:
             img_mask = img_mask.expand_as(imgs)
-            img_mask = torch.index_select(img_mask, 2, t_indices)
+            img_mask = torch.index_select(img_mask, 2, self.t_pred_indices)
             img_mask = img_mask[:, 0]  # (N, T, H, W)
 
         return target, pred, mask, im_masked, im_paste, img_mask
+
+
+def _parse_indices(indices: str | list[int] | None, size: int) -> torch.Tensor:
+    if indices is None:
+        indices = torch.arange(0, size)
+    elif isinstance(indices, str):
+        start, stop, step = _parse_slice(indices)
+        indices = torch.arange(start, stop or size, step)
+    elif isinstance(indices, list):
+        indices = torch.as_tensor(indices)
+    else:
+        raise TypeError(f"Unsupported indices: {indices}")
+    return indices
+
+
+def _parse_slice(slc: str) -> tuple[int, int | None, int]:
+    """Parse a slice expression like '0:8:2' to a tuple of (start, stop, step)."""
+    values = [ast.literal_eval(val) for val in slc.strip().split(":")]
+    if len(values) == 2:
+        values.append(1)
+    return tuple(values)
 
 
 def mae_vit_nano_patch16(**kwargs):

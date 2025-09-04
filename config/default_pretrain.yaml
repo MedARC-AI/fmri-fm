@@ -52,14 +52,18 @@ masking_kwargs:
   block_size: 160
 
 # Temporal config.
-# t_pred_patch_size controls how many input frames the decoder predicts. MAE-st default
-# is to just predict the first frame of each input temporal patch. Setting
-# t_pred_patch_size = t_patch_size predicts all input frames. t_pred_patch_size must
-# divide t_patch_size.
-#
-# setting num_frames = t_patch_size = t_pred_patch_size recovers standard MAE.
+# t_embed_patch_indices and t_pred_patch_indices define which frames from each patch are
+# encoded and decoded respectively. The options are:
+#   - null (encode/decode all frames in the patch)
+#   - a slice expression like '0:8', '0:None:2'
+#   - an explicit list of indices
 num_frames: 16
-t_patch_size: 2
+t_patch_size: 16
+t_embed_patch_indices: null       # encode all frames
+t_pred_patch_indices: "0:None:2"  # decode every other frame
+
+# previous option to specify the temporal patch size of decoder, for backwards
+# compatibility.
 t_pred_patch_size: 1
 
 decoder_depth: 4

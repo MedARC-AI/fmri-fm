@@ -93,6 +93,8 @@ def test_mae_vit(
     assert not torch.isnan(loss)
     assert loss.item() < 3
 
+    model.forward_masked_recon(x, pred, mask, img_mask=img_mask)
+
 
 def test_mae_vit_expected_loss():
     # check that model computation doesn't change in case we change implementation.
@@ -126,3 +128,33 @@ def test_mae_masked_patch_embed():
     model = mae_vit_tiny_patch16(mask_patch_embed=True)
     loss, pred, mask, decoder_mask = model.forward(x, img_mask=img_mask)
     assert not torch.isnan(loss)
+
+
+@pytest.mark.parametrize(
+    "t_embed_patch_indices,t_pred_patch_indices",
+    [
+        (None, "0:None:2"),
+        ("0:None", "0:None:2"),
+        ("0:None:2", "1:None:2"),
+        ("0:2", "2:4"),
+        (None, None),
+        (None, [0, 3]),
+    ],
+)
+def test_mae_t_patch_indices(
+    t_embed_patch_indices,
+    t_pred_patch_indices,
+):
+    T, H, W = 16, 224, 224
+    x = torch.randn(2, 3, T, H, W)
+    img_mask = torch.zeros(H, W)
+    img_mask[18 : H - 18, 18 : W - 18] = 1
+
+    model = mae_vit_tiny_patch16(
+        t_embed_patch_indices=t_embed_patch_indices,
+        t_pred_patch_indices=t_pred_patch_indices,
+    )
+    loss, pred, mask, decoder_mask = model.forward(x, img_mask=img_mask)
+    assert not torch.isnan(loss)
+
+    model.forward_masked_recon(x, pred, mask, img_mask)
