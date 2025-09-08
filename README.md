@@ -65,7 +65,6 @@ The codebase follows a [flat organization](https://www.evandemond.com/programmin
 **Models**
 
 - [`models_mae.py`](src/models_mae.py): Spatiotemporal masked autoencoder (MAE-st) for fMRI data.
-- [`models_vit.py`](src/models_vit.py): Vanilla vision transformer (ViT) for fMRI data.
 - [`models_mae_linear.py`](src/models_mae_linear.py): Linear masked autoencoder baseline.
 
 **Datasets**
