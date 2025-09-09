@@ -36,9 +36,12 @@ in_chans: 1
 mask_ratio: 0.9
 
 # decoder mask ratio for VideoMAEv2 style sparse decoding.
-decoder_mask_ratio: null
+# setting to null disables, and you decode all patches including background.
+# setting to 0.0 means you decode all unobserved patches within the image mask.
+decoder_mask_ratio: 0.0
 
 # Constraints for the visible mask:
+#   - null: uniform random masking
 #   - tube: patch tube masking, as in VideoMAE
 #   - hemi: visible mask constrained to left or right hemisphere
 #   - inverse_block: visible bask is a local square block
@@ -55,7 +58,7 @@ masking_kwargs:
 # Temporal config.
 # t_embed_patch_indices and t_pred_patch_indices define which frames from each patch are
 # encoded and decoded respectively. The options are:
-#   - null (encode/decode all frames in the patch)
+#   - null (embed: all frames, pred: fall back to t_pred_patch_size)
 #   - a slice expression like '0:8', '0:None:2'
 #   - an explicit list of indices
 num_frames: 16
@@ -65,7 +68,7 @@ t_pred_patch_indices: "0:None:2"  # decode every other frame
 
 # previous option to specify the temporal patch size of decoder, for backwards
 # compatibility.
-t_pred_patch_size: 1
+t_pred_patch_size: null
 
 decoder_depth: 4
 sep_pos_embed: true
@@ -79,11 +82,11 @@ init_decoder_scale: null
 mask_patch_embed: false
 
 # target normalization, as in MAE
-#   - none: no target normalization
+#   - null: no target normalization
 #   - global: full spatiotemporal sequence
 #   - frame: each temporal "framelet" (number of true frames = t_pred_patch_size)
 #   - patch: each patch "tubelet" (same as MAE)
-target_norm: none
+target_norm: null
 # make reconstruction plots with normalized targets. otherwise, the normalized
 # predictions are un-normalized using the scale and offset from the targets.
 normalize_recon: false
@@ -91,7 +94,7 @@ normalize_recon: false
 # Optimization
 epochs: 100
 # batch size per gpu, so total_batch_size = batch_size * num_gpus_per_node * num_nodes
-batch_size: 4
+batch_size: 32
 accum_iter: 1
 
 # absolute_lr = base_lr * total_batch_size / 256
@@ -143,12 +146,13 @@ datasets:
 clip_vmax: 3.0
 
 # normalize each video clip.
+#   - null: no normalization
 #   - global: the clip is globally normalized to mean zero unit variance.
 #   - frame: each temporal frame is independently normalized.
 # fMRI data have a lot of slow global variation (i.e. the "global signal"). z-scoring
 # each clip is one way to try to get the model to focus on more interesting local
 # activity variation.
-normalize: null
+normalize: frame
 
 # cropping options
 # fixed bbox to crop to (inefficient hack for testing performance on interior crops)
@@ -164,10 +168,10 @@ crop_kwargs:
   interpolation: 3  # PIL interp constant, 2=BILINEAR, 3=BICUBIC
 
 # Data loader
-num_workers: 4
+num_workers: 8
 
-checkpoint_period: 5
-max_checkpoints: 4
+checkpoint_period: 10
+max_checkpoints: null
 
 wandb: true
 wandb_entity: null

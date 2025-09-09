@@ -1,10 +1,12 @@
 import fnmatch
 import inspect
 import json
+from glob import glob
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal
 
+import braceexpand
 import numpy as np
 import torch
 import torchvision.transforms.v2 as v2
@@ -37,7 +39,7 @@ def make_flat_wds_dataset(
     # guaranteeing that no process runs out of data early in distributed training.
     # see webdataset FAQ: https://github.com/webdataset/webdataset/blob/main/FAQ.md
     dataset = wds.WebDataset(
-        url,
+        expand_urls(url),
         resampled=shuffle,
         shardshuffle=False,
         nodesplitter=wds.split_by_node,
@@ -57,6 +59,32 @@ def make_flat_wds_dataset(
     if shuffle:
         dataset = dataset.shuffle(buffer_size)
     return dataset
+
+
+def expand_urls(urls: str | list[str]) -> list[str]:
+    """
+    Expand wds urls:
+
+    - expand glob patterns
+    - expand brace expressions
+    - filter files that don't exist
+
+    Adapted from `webdataset.shardlists.expand_urls`.
+    """
+    if isinstance(urls, str):
+        urls = [urls]
+    results = []
+    for url in urls:
+        chars = set(url)
+        if chars.intersection("[*?"):
+            result = sorted(glob(url))
+        elif "{" in chars:
+            result = braceexpand.braceexpand(url)
+        else:
+            result = [url]
+        results.extend(result)
+    results = [url for url in results if Path(url).exists()]
+    return results
 
 
 class FlatClipsDataset(Dataset):
