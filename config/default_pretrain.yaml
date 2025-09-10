@@ -44,8 +44,9 @@ decoder_mask_ratio: 0.0
 #   - null: uniform random masking
 #   - tube: patch tube masking, as in VideoMAE
 #   - hemi: visible mask constrained to left or right hemisphere
-#   - inverse_block: visible bask is a local square block
-#   - hemi_inverse_block: visible bask is a square block constrained to one hemi
+#   - inverse_block: visible mask is a local square block
+#   - hemi_inverse_block: visible mask is a square block constrained to one hemi
+#   - network: visible mask is a subset of pre-defined functional networks
 # Default is unconstrained uniform masking.
 masking: null
 masking_kwargs:
@@ -54,6 +55,12 @@ masking_kwargs:
   # will ultimately be visible. so should overestimate relative to the desired number of
   # visible patches.
   block_size: 160
+
+  # path to network parcellation, shape [H, W] with values in [0, n] where n is the
+  # number of networks and 0 is background.
+  networks_path: datasets/Yeo2011_RSFC_7Networks.flat.npy
+  # number of networks to include.
+  num_keep: 2
 
 # Temporal config.
 # t_embed_patch_indices and t_pred_patch_indices define which frames from each patch are

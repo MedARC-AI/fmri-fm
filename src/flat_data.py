@@ -9,6 +9,7 @@ from typing import Any, Callable, Iterable, Literal
 import braceexpand
 import numpy as np
 import torch
+import torch.nn.functional as F
 import torchvision.transforms.v2 as v2
 import torchvision.transforms.v2.functional as TF
 import torchvision.tv_tensors as tvt
@@ -459,6 +460,27 @@ def hemi_inverse_block_masking(
     return visible_mask
 
 
+def network_masking(
+    mask: torch.Tensor, networks: torch.Tensor, num_keep: int = 1
+) -> torch.Tensor:
+    """Mask out a fixed number of regions from a map of functional "networks"
+
+    Args:
+        mask: input image mask, shape (H, W). not used but included for consistency.
+        networks: fixed one hot network mask, shape (H, W, n), where n is the number of networks.
+        num_keep: number of networks to keep in the visible mask
+
+    Returns:
+        visible_mask: mask of shape (H, W) containing the num_keep visible networks.
+    """
+    assert num_keep > 0, "Cannot mask everything (num_keep is currently 0)."
+
+    H, W, n = networks.shape
+    indices = torch.randperm(n)[:num_keep]
+    visible_mask = networks[..., indices].any(dim=-1)
+    return visible_mask.float()
+
+
 # TODO: Other masking strategies to try:
 #   - Network masking. Get Schaefer 7 network label map. Mask out networks with some
 #     probability p.
@@ -473,10 +495,22 @@ MASKING_REGISTRY = {
     "hemi": hemi_masking,
     "inverse_block": inverse_block_masking,
     "hemi_inverse_block": hemi_inverse_block_masking,
+    "network": network_masking,
 }
 
 
 def make_masking(masking: str, **kwargs) -> Callable:
+    kwargs = kwargs.copy()
+
+    # load the network parcellation and convert to one hot
+    # TODO: bit of hack, could be better by making the masking utils modules.
+    if masking == "network":
+        networks_path = kwargs.pop("networks_path")
+        networks = torch.from_numpy(np.load(networks_path))
+        networks = F.one_hot(networks)
+        networks = networks[:, :, 1:]  # drop background map
+        kwargs["networks"] = networks
+
     mask_fn = MASKING_REGISTRY[masking]
     kwargs = filter_kwargs(mask_fn, kwargs)
     mask_fn = partial(mask_fn, **kwargs)
