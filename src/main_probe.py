@@ -45,7 +45,7 @@ from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 PROJECT = "fMRI-foundation-model"
 
-DEFAULT_CONFIG = Path(__file__).parents[1] / "config/default_classification.yaml"
+DEFAULT_CONFIG = Path(__file__).parents[1] / "config/default_probe.yaml"
 
 MODELS_DICT = {
     **models_mae.__dict__,

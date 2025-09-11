@@ -1,0 +1,48 @@
+# Name of the run. For output directory and wandb.
+name: hcp_pheno_eval
+
+# Prediction task
+#   - classification
+#   - regression
+task: regression
+
+# Datasets
+datasets:
+- name: hcp-train-rest1
+  root: datasets/flat-clips/hcp-train-rest1-clips-16t
+  split_range: [0.0, 0.9]
+  shuffle: true
+
+- name: hcp-train-rest1-subset
+  root: datasets/flat-clips/hcp-train-rest1-clips-16t
+  split_range: [0.0, 0.1]
+  shuffle: false
+
+- name: hcp-train-rest1-holdout
+  root: datasets/flat-clips/hcp-train-rest1-clips-16t
+  split_range: [0.9, 1.0]
+  shuffle: false
+
+- name: hcp-train-rest2-subset
+  root: datasets/flat-clips/hcp-train-rest2-clips-16t
+  split_range: [0.0, 0.1]
+  shuffle: false
+
+- name: hcp-val-rest
+  root: datasets/flat-clips/hcp-val-rest-clips-16t
+  shuffle: false
+
+# Dataset names for special subsets.
+train_dataset_name: hcp-train-rest1
+val_dataset_name: hcp-train-rest2-subset
+test_dataset_name: hcp-val-rest
+
+# Target ID map, if not already in the samples.
+target_id_map: datasets/hcp-phenotype/regression_target_id_map.json
+target_key: sub
+
+# Number of target classes for classification, or target dimension for regression.
+num_classes: 2
+
+# Names of regression targets
+target_names: [Sadness_Unadj, ReadEng_Unadj]

@@ -1,10 +1,10 @@
 # Name of the run. For output directory and wandb.
-name: hcp_pheno_regression
+name: probe_eval
 
 # Prediction task
 #   - classification
 #   - regression
-task: regression
+task: classification
 
 # Description of the run. Goes in wandb notes.
 notes: null
@@ -30,10 +30,12 @@ model: mae_vit_base_patch16
 img_size: [224, 560]
 in_chans: 1
 
+# NOTE: masking options not needed for probe evaluation.
+
 # Temporal config.
 # t_embed_patch_indices and t_pred_patch_indices define which frames from each patch are
 # encoded and decoded respectively. The options are:
-#   - null (encode/decode all frames in the patch)
+#   - null (embed: all frames, pred: fall back to t_pred_patch_size)
 #   - a slice expression like '0:8', '0:None:2'
 #   - an explicit list of indices
 num_frames: 16
@@ -43,7 +45,7 @@ t_pred_patch_indices: "0:None:2"  # decode every other frame
 
 # previous option to specify the temporal patch size of decoder, for backwards
 # compatibility.
-t_pred_patch_size: 1
+t_pred_patch_size: null
 
 decoder_depth: 4
 sep_pos_embed: true
@@ -51,8 +53,6 @@ cls_embed: true
 
 # correct for the number of observed pixels in the patch embedding
 mask_patch_embed: false
-
-init_decoder_scale: null
 
 # Baseline model settings
 parcellation_path: datasets/Schaefer2018_400Parcels_7Networks_order.flat.npy
@@ -68,9 +68,12 @@ representations:
 attn_pool_embed_dim: null
 
 # Grid of learning rate scale factors and weight decays for linear classifiers.
-# Copied from CAPI.
-lr_scale_grid: [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0]
-weight_decay_grid: [5e-4, 1e-3, 5e-2]
+# Original grid from CAPI:
+# lr_scale_grid: [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0]
+# weight_decay_grid: [5e-4, 1e-3, 5e-2]
+# Updated grid with more coverage:
+lr_scale_grid: [0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]
+weight_decay_grid: [3e-4, 0.001, 0.01, 0.03, 0.1, 0.3, 1.0]
 
 # Optimization
 epochs: 20
@@ -90,45 +93,27 @@ clip_grad: 1.0
 fp32: false
 
 # Datasets
-datasets:
-- name: hcp-train-rest1
-  root: datasets/flat-clips/hcp-train-rest1-clips-16t
-  split_range: [0.0, 0.9]
-  shuffle: true
+# List of datasets such as:
+# - name: hcp-train
+#   root: datasets/flat-clips/hcp-train-task-clips-16t
+#   split_range: [0.0, 0.9]
+#   shuffle: true
+datasets: []
 
-- name: hcp-train-rest1-subset
-  root: datasets/flat-clips/hcp-train-rest1-clips-16t
-  split_range: [0.0, 0.1]
-  shuffle: false
-
-- name: hcp-train-rest1-holdout
-  root: datasets/flat-clips/hcp-train-rest1-clips-16t
-  split_range: [0.9, 1.0]
-  shuffle: false
-
-- name: hcp-train-rest2-subset
-  root: datasets/flat-clips/hcp-train-rest2-clips-16t
-  split_range: [0.0, 0.1]
-  shuffle: false
-
-- name: hcp-val-rest
-  root: datasets/flat-clips/hcp-val-rest-clips-16t
-  shuffle: false
+# Dataset names for special subsets.
+train_dataset_name: TRAIN
+val_dataset_name: VAL
+test_dataset_name: TEST
 
 # Target ID map, if not already in the samples.
-target_id_map: datasets/hcp-phenotype/regression_target_id_map.json
-target_key: sub
+target_id_map: null
+target_key: null
 
 # Number of target classes for classification, or target dimension for regression.
 num_classes: 2
 
 # Names of regression targets
-target_names: [Sadness_Unadj, ReadEng_Unadj]
-
-# Dataset names for special subsets.
-train_dataset_name: hcp-train-rest1
-val_dataset_name: hcp-train-rest2-subset
-test_dataset_name: hcp-val-rest
+target_names: null
 
 # Data transform
 # clip extreme values to [-vmax, vmax]. note that during flat dataset generation, each
@@ -136,18 +121,21 @@ test_dataset_name: hcp-val-rest
 clip_vmax: 3.0
 
 # normalize each video clip.
+#   - null: no normalization
 #   - global: the clip is globally normalized to mean zero unit variance.
 #   - frame: each temporal frame is independently normalized.
 # fMRI data have a lot of slow global variation (i.e. the "global signal"). z-scoring
 # each clip is one way to try to get the model to focus on more interesting local
 # activity variation.
-normalize: null
+normalize: frame
+
+# TODO: cropping is not yet implemented for probe evaluation.
 
 # Data loader
 num_workers: 8
 
-checkpoint_period: 1
-max_checkpoints: 4
+checkpoint_period: 5
+max_checkpoints: null
 
 wandb: true
 wandb_entity: null

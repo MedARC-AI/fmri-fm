@@ -1,0 +1,44 @@
+# Name of the run. For output directory and wandb.
+name: hcp_task_eval
+
+# Prediction task
+#   - classification
+#   - regression
+task: classification
+
+# Datasets
+datasets:
+- name: hcp-train
+  root: datasets/flat-clips/hcp-train-task-clips-16t
+  split_range: [0.0, 0.9]
+  shuffle: true
+
+- name: hcp-train-subset
+  root: datasets/flat-clips/hcp-train-task-clips-16t
+  split_range: [0.0, 0.1]
+  shuffle: false
+
+- name: hcp-train-holdout
+  root: datasets/flat-clips/hcp-train-task-clips-16t
+  split_range: [0.9, 1.0]
+  shuffle: false
+
+- name: hcp-val
+  root: datasets/flat-clips/hcp-val-task-clips-16t
+  shuffle: false
+
+- name: hcp-test
+  root: datasets/flat-clips/hcp-test-task-clips-16t
+  shuffle: false
+
+# Dataset names for special subsets.
+train_dataset_name: hcp-train
+val_dataset_name: hcp-val
+test_dataset_name: hcp-test
+
+# Target ID map, if not already in the samples.
+target_id_map: null
+target_key: null
+
+# Number of target classes for classification, or target dimension for regression.
+num_classes: 21
