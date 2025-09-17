@@ -699,6 +699,170 @@ class MaskedAutoencoderViT(nn.Module):
 
         return target, pred, mask, im_masked, im_paste, img_mask
 
+    @torch.no_grad()
+    def forward_denoise(
+        self,
+        imgs,
+        mask_ratio=0.75,
+        n_samples=4,
+        img_mask=None,
+        generator=None,
+        aggregation="mean",
+        deterministic=False,
+    ):
+        """
+        Explicit denoising via multiple masked reconstructions.
+        
+        runs mae n_samples + 1 times with different masks, then aggregates
+        reconstructions. structured signal will be consistent across runs, while
+        unstructured noise will be inconsistent.
+        
+        args:
+            imgs: input fmri volume [n, c, t, h, w]
+            mask_ratio: fraction of patches to mask per run
+            n_samples: number of masked reconstructions to run
+            img_mask: optional binary mask of valid voxels
+            generator: torch.generator for reproducibility (used for random masking)
+            aggregation: how to combine reconstructions ("mean", "median", "variance_weighted")
+            deterministic: if true, use systematic masking; if false, use random masking
+            
+        returns:
+            denoised_imgs: [n, c, t, h, w] denoised fmri volume
+        """
+        n, c, t, h, w = imgs.shape
+        
+        # handle masks consistently with existing forward method
+        visible_mask = img_mask
+        if img_mask is not None:
+            img_mask = img_mask.expand_as(imgs)
+        if visible_mask is not None:
+            visible_mask = visible_mask.expand_as(imgs)
+        
+        # run multiple masked reconstructions
+        reconstructions = []
+        
+        for run_idx in range(n_samples + 1):
+            if deterministic:
+                # use deterministic masking, each run masks a different systematic chunk
+                run_visible_mask = self._generate_deterministic_mask(
+                    imgs, mask_ratio, run_idx, n_samples + 1, visible_mask
+                )
+                run_generator = None # no randomness
+            else:
+                # use random masking with different seed for each run
+                if generator is not None:
+                    run_generator = torch.Generator(device=generator.device)
+                    run_generator.manual_seed(generator.initial_seed() + run_idx)
+                else:
+                    run_generator = None
+                run_visible_mask = visible_mask
+            
+            # run mae with the selected mask strategy
+            prefix, latent, mask, ids_keep = self.forward_encoder(
+                imgs, mask_ratio, run_visible_mask, run_generator
+            )
+            pred, decoder_mask = self.forward_decoder(
+                latent, mask, ids_keep, decoder_mask_ratio=None, img_mask=img_mask, generator=run_generator
+            )
+            
+            reconstructions.append(pred)
+        
+        # aggregate reconstructions
+        stacked_reconstructions = torch.stack(reconstructions)
+        
+        # based on the aggregation method chosen
+        if aggregation == "mean":
+            final_patches = stacked_reconstructions.mean(dim=0)
+        elif aggregation == "median":
+            final_patches = stacked_reconstructions.median(dim=0)[0]
+        elif aggregation == "variance_weighted":
+            # weight by inverse variance - lower variance gets higher weight
+            variances = stacked_reconstructions.var(dim=0, keepdim=True)
+            weights = 1.0 / (variances + 1e-8)  # add small epsilon to avoid division by zero
+            weights = weights / weights.sum(dim=0, keepdim=True)  # normalize weights
+            final_patches = (stacked_reconstructions * weights).sum(dim=0)
+        else:
+            raise ValueError(f"unknown aggregation method: {aggregation}. choose from: mean, median, variance_weighted")
+        
+        # convert back to image space using unpatchify
+        # need to call patchify with target frames to set correct patch_info for unpatchify
+        target_imgs = torch.index_select(imgs, 2, self.t_pred_indices)
+        _ = self.patchify(target_imgs)  # sets self.patch_info for prediction dimensions
+        denoised_imgs = self.unpatchify(final_patches)
+        
+        return denoised_imgs
+
+    def _generate_deterministic_mask(self, imgs, mask_ratio, run_idx, total_runs, base_visible_mask):
+        """
+        generate deterministic visible mask for systematic patch coverage.
+        
+        splits all patches into total_runs contiguous chunks. each run makes
+        one chunk invisible while keeping others visible. guarantees every
+        patch is masked exactly once across all runs.
+        
+        args:
+            imgs: input images [n, c, t, h, w]
+            mask_ratio: fraction of patches to mask (determines chunk size)
+            run_idx: current run index (0 to total_runs-1)
+            total_runs: total number of runs (n_samples + 1)
+            base_visible_mask: base visibility mask (img_mask)
+            
+        returns:
+            visible_mask: [n, c, t, h, w] mask where 1=visible, 0=masked
+        """
+        n, c, t, h, w = imgs.shape
+        
+        # get patch dimensions
+        t_patches = self.patch_embed.t_grid_size
+        h_patches = self.patch_embed.grid_size[0]
+        w_patches = self.patch_embed.grid_size[1]
+        total_patches = t_patches * h_patches * w_patches
+        
+        # calculate patch sizes for unpacking
+        patch_t = t // t_patches
+        patch_h = h // h_patches
+        patch_w = w // w_patches
+        
+        # start with base visible mask (or all visible if none provided)
+        if base_visible_mask is None:
+            visible_mask = torch.ones(n, c, t, h, w, device=imgs.device)
+        else:
+            visible_mask = base_visible_mask.clone()
+        
+        # split patches into total_runs chunks and select which chunk to mask
+        # this ensures each patch is masked exactly once across all runs
+        chunk_size = total_patches // total_runs
+        remainder = total_patches % total_runs
+        
+        # calculate chunk boundaries for this run
+        if run_idx < remainder:
+            chunk_start = run_idx * (chunk_size + 1)
+            chunk_end = chunk_start + chunk_size + 1
+        else:
+            chunk_start = remainder * (chunk_size + 1) + (run_idx - remainder) * chunk_size
+            chunk_end = chunk_start + chunk_size
+        
+        # mask the selected chunk of patches
+        for patch_idx in range(chunk_start, chunk_end):
+            # convert linear patch index to 3d coordinates
+            t_idx = patch_idx // (h_patches * w_patches)
+            hw_idx = patch_idx % (h_patches * w_patches)
+            h_idx = hw_idx // w_patches
+            w_idx = hw_idx % w_patches
+            
+            # calculate pixel ranges for this patch
+            t_start = t_idx * patch_t
+            t_end = min((t_idx + 1) * patch_t, t)
+            h_start = h_idx * patch_h
+            h_end = min((h_idx + 1) * patch_h, h)
+            w_start = w_idx * patch_w
+            w_end = min((w_idx + 1) * patch_w, w)
+            
+            # mask this patch (set to 0 = invisible)
+            visible_mask[:, :, t_start:t_end, h_start:h_end, w_start:w_end] = 0
+        
+        return visible_mask
+
 
 def _parse_indices(indices: str | list[int] | None, size: int) -> torch.Tensor:
     if indices is None:
