@@ -727,9 +727,6 @@ class MaskedAutoencoderViT(nn.Module):
         """
         N, C, T, H, W = imgs.shape
 
-        # handle masks using forward methods
-        if img_mask is not None:
-            img_mask = img_mask.expand_as(imgs)
         # we assume a shared img_mask for all samples for simplicity.
         if img_mask is not None:
             assert img_mask.shape == (H, W), "invalid img_mask for denoising"
