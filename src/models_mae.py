@@ -710,98 +710,121 @@ class MaskedAutoencoderViT(nn.Module):
     ):
         """
         Explicit denoising via multiple masked reconstructions.
-        
+
         runs mae n_samples + 1 times with partitioned patch masks, then aggregates
         reconstructions. each patch is reconstructed either n_samples or n_samples + 1 times due to remainder handling.
         structured signal will be consistent across runs, while unstructured noise will be inconsistent.
-        
+
         args:
-            imgs: input fmri volume [n, c, t, h, w]
+            imgs: input fmri volume [N, C, T, H, W]
             mask_ratio: fraction of patches to mask per run (1-mask_ratio are visible)
             n_samples: number of masked reconstructions to run
             img_mask: optional binary mask of valid voxels
             generator: torch.generator for reproducibility
-            
+
         returns:
-            denoised_imgs: [n, c, t, h, w] denoised fmri volume
+            denoised_imgs: [N, C, T, H, W] denoised fmri volume
         """
-        n, c, t, h, w = imgs.shape
-        
-        # handle masks using forward methods 
-        visible_mask = img_mask
+        N, C, T, H, W = imgs.shape
+
+        # handle masks using forward methods
         if img_mask is not None:
             img_mask = img_mask.expand_as(imgs)
-        if visible_mask is not None:
-            visible_mask = visible_mask.expand_as(imgs)
-        
-        # get patch dimensions
-        t_patches = self.patch_embed.t_grid_size
-        h_patches = self.patch_embed.grid_size[0]
-        w_patches = self.patch_embed.grid_size[1]
-        total_patches = t_patches * h_patches * w_patches
-        
-        # generate random patch permutation (using generator for reproducibility)
-        if generator is not None:
-            patch_permutation = torch.randperm(total_patches, generator=generator, device=imgs.device)
+        # we assume a shared img_mask for all samples for simplicity.
+        if img_mask is not None:
+            assert img_mask.shape == (H, W), "invalid img_mask for denoising"
         else:
-            patch_permutation = torch.randperm(total_patches, device=imgs.device)
-        
+            img_mask = torch.ones(H, W, device=imgs.device)
+
+        # get patch dimensions
+        T_patches = self.patch_embed.t_grid_size
+        H_patches = self.patch_embed.grid_size[0]
+        W_patches = self.patch_embed.grid_size[1]
+        # total_patches = T_patches * H_patches * W_patches - commented out because it's not used
+
+        # generate random patch permutation (using generator for reproducibility)
+        valid_ids = img_mask.flatten().nonzero().flatten()
+        patch_permutation = torch.randperm(
+            valid_ids, generator=generator, device=imgs.device
+        )
+
         # run multiple masked reconstructions
         reconstructions = []
         decoder_masks = []
-        
+
         # run n_samples + 1 times
         for run_idx in range(n_samples + 1):
             # create visible mask for this run using sliding window approach
             run_visible_mask = self._generate_visible_mask(
-                imgs, run_idx, n_samples + 1, visible_mask, patch_permutation,
-                t_patches, h_patches, w_patches, mask_ratio, n_samples, generator
+                imgs,
+                run_idx,
+                n_samples + 1,
+                img_mask,
+                patch_permutation,
+                T_patches,
+                H_patches,
+                W_patches,
+                mask_ratio,
+                n_samples,
+                generator,
             )
-            
+
             # run mae. note: masking_ratio is 0.0 since we are already choosing which patches to mask
             prefix, latent, mask, ids_keep = self.forward_encoder(
                 imgs, 0.0, run_visible_mask, generator
             )
             pred, decoder_mask = self.forward_decoder(
-                latent, mask, ids_keep, decoder_mask_ratio=None, img_mask=img_mask, generator=generator
+                latent,
+                mask,
+                ids_keep,
+                decoder_mask_ratio=0.0,
+                img_mask=img_mask,
+                generator=generator,
             )
-            
+
             # unnormalize prediction before storing
             pred_unnorm = self.unnormalize(pred)
             reconstructions.append(pred_unnorm)
             decoder_masks.append(decoder_mask)
-        
+
         # aggregate reconstructions using proper weighted mean
         # each patch may be reconstructed a different number of times
         stacked_reconstructions = torch.stack(reconstructions)  # [n_runs, N, L, D]
-        stacked_decoder_masks = torch.stack(decoder_masks)      # [n_runs, N, L]
-        
+        stacked_decoder_masks = torch.stack(decoder_masks)  # [n_runs, N, L]
+
         # compute weighted mean accounting for how many times each patch was reconstructed
         # decoder_mask: 1 = reconstructed, 0 = not reconstructed
         weights = stacked_decoder_masks.unsqueeze(-1)  # [n_runs, N, L, 1]
-        
+
         # sum of reconstructions and sum of weights for each patch
         weighted_sum = (stacked_reconstructions * weights).sum(dim=0)  # [N, L, D]
         weight_sum = weights.sum(dim=0)  # [N, L, 1]
-        
+
         # avoid division by zero: if no reconstructions, keep original (shouldn't happen)
         final_patches = torch.where(
             weight_sum > 0,
             weighted_sum / weight_sum,
-            stacked_reconstructions[0]  # fallback to first reconstruction
+            stacked_reconstructions[0],  # fallback to first reconstruction
         )
-        
+
         # convert back to image space using unpatchify
         # need to call patchify with target frames to set correct patch_info for unpatchify
         target_imgs = torch.index_select(imgs, 2, self.t_pred_indices)
         _ = self.patchify(target_imgs)  # sets self.patch_info for prediction dimensions
         denoised_imgs = self.unpatchify(final_patches)
-        
+
         return denoised_imgs
 
     def _generate_visible_mask(
-        self, imgs, run_idx, total_runs, base_visible_mask,
-        patch_permutation, t_patches, h_patches, w_patches
+        self,
+        imgs,
+        run_idx,
+        total_runs,
+        img_mask,
+        patch_permutation,
+        T_patches,
+        H_patches,
+        W_patches,
     ):
         """
         Partition-based visible mask:
@@ -810,8 +833,8 @@ class MaskedAutoencoderViT(nn.Module):
         - For this run, mark its group as visible, others as masked.
         Ensures each patch is reconstructed n_samples or n_samples+1 times.
         """
-        n, c, t, h, w = imgs.shape
-        P = t_patches * h_patches * w_patches
+        N, C, T, H, W = imgs.shape
+        P = T_patches * H_patches * W_patches
 
         # Split shuffled permutation into groups
         groups = torch.tensor_split(patch_permutation, total_runs)
@@ -820,24 +843,20 @@ class MaskedAutoencoderViT(nn.Module):
         visible_patch_indices = groups[run_idx]
 
         # Build patch mask (1 = visible, 0 = masked)
-        patch_mask = torch.zeros(
-            (n, 1, P), device=imgs.device, dtype=torch.float32
-        )
-        patch_mask[:, 0, visible_patch_indices] = 1.0
-        patch_mask = patch_mask.view(n, 1, t_patches, h_patches, w_patches)
+        patch_mask = torch.zeros((N, P), device=imgs.device, dtype=torch.float32)
+        patch_mask[:, visible_patch_indices] = 1.0
 
-        # Expand to voxel resolution
-        patch_t = t // t_patches
-        patch_h = h // h_patches
-        patch_w = w // w_patches
-        visible_mask = patch_mask.repeat_interleave(patch_t, dim=2) \
-                                 .repeat_interleave(patch_h, dim=3) \
-                                 .repeat_interleave(patch_w, dim=4)
-        visible_mask = visible_mask.expand(-1, c, -1, -1, -1)
+        # Expand to voxel resolution using unpatchify
+        ph, pw = self.patch_embed.patch_size
+        pt = self.t_pred_patch_size
+        patch_mask = patch_mask.unsqueeze(-1).expand(
+            -1, -1, pt * ph * pw * C
+        )  # (N, T*H*W, u*p*p*c)
+        visible_mask = self.unpatchify(patch_mask)  # (N, C, T, H, W)
 
         # Apply optional base mask
-        if base_visible_mask is not None:
-            visible_mask = visible_mask * base_visible_mask
+        if img_mask is not None:
+            visible_mask = visible_mask * img_mask
 
         return visible_mask
 
