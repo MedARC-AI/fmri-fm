@@ -12,7 +12,7 @@ dependencies = [
     "datasets",
     "einops",
     "fvcore",
-    "huggingface_hub",
+    "huggingface-hub",
     "iopath",
     "ipython",
     "jupyter",

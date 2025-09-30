@@ -727,23 +727,25 @@ class MaskedAutoencoderViT(nn.Module):
         """
         N, C, T, H, W = imgs.shape
 
-        # we assume a shared img_mask for all samples for simplicity.
-        if img_mask is not None:
-            assert img_mask.shape == (H, W), "invalid img_mask for denoising"
-        else:
-            img_mask = torch.ones(H, W, device=imgs.device)
-
         # get patch dimensions
         T_patches = self.patch_embed.t_grid_size
         H_patches = self.patch_embed.grid_size[0]
         W_patches = self.patch_embed.grid_size[1]
         # total_patches = T_patches * H_patches * W_patches - commented out because it's not used
 
+        # we assume a shared img_mask for all samples for simplicity.
+        if img_mask is not None:
+            assert img_mask.shape == (H_patches, W_patches), (
+                "invalid img_mask for denoising"
+            )
+        else:
+            img_mask = torch.ones(H_patches, W_patches, device=imgs.device)
+
         # generate random patch permutation (using generator for reproducibility)
         valid_ids = img_mask.flatten().nonzero().flatten()
-        patch_permutation = torch.randperm(
-            valid_ids, generator=generator, device=imgs.device
-        )
+        patch_permutation = valid_ids[
+            torch.randperm(len(valid_ids), generator=generator, device=valid_ids.device)
+        ]
 
         # run multiple masked reconstructions
         reconstructions = []
@@ -761,9 +763,6 @@ class MaskedAutoencoderViT(nn.Module):
                 T_patches,
                 H_patches,
                 W_patches,
-                mask_ratio,
-                n_samples,
-                generator,
             )
 
             # run mae. note: masking_ratio is 0.0 since we are already choosing which patches to mask
@@ -775,7 +774,7 @@ class MaskedAutoencoderViT(nn.Module):
                 mask,
                 ids_keep,
                 decoder_mask_ratio=0.0,
-                img_mask=img_mask,
+                img_mask=None,  # bypass temporal masking for explicit denoising
                 generator=generator,
             )
 
@@ -824,36 +823,31 @@ class MaskedAutoencoderViT(nn.Module):
         W_patches,
     ):
         """
-        Partition-based visible mask:
-        - Shuffle patches with patch_permutation (random, reproducible via generator).
-        - Split into total_runs groups (non-overlapping).
-        - For this run, mark its group as visible, others as masked.
-        Ensures each patch is reconstructed n_samples or n_samples+1 times.
+        Partition-based visible mask with correct temporal handling.
+        - Randomly partition patch_permutation into total_runs.
+        - Select run_idx group as visible.
+        - Expand 2D patch-level mask to voxel space using unpatchify without manual repeats.
         """
         N, C, T, H, W = imgs.shape
-        P = T_patches * H_patches * W_patches
 
         # Split shuffled permutation into groups
         groups = torch.tensor_split(patch_permutation, total_runs)
-
-        # Get visible indices for this run
         visible_patch_indices = groups[run_idx]
 
-        # Build patch mask (1 = visible, 0 = masked)
-        patch_mask = torch.zeros((N, P), device=imgs.device, dtype=torch.float32)
-        patch_mask[:, visible_patch_indices] = 1.0
+        # Call patchify to set self.patch_info
+        _ = self.patchify(imgs, predict=True)
+        N, C, T, H, W, ph, pw, u, t, h, w = self.patch_info
 
-        # Expand to voxel resolution using unpatchify
-        ph, pw = self.patch_embed.patch_size
-        pt = self.t_pred_patch_size
-        patch_mask = patch_mask.unsqueeze(-1).expand(
-            -1, -1, pt * ph * pw * C
-        )  # (N, T*H*W, u*p*p*c)
-        visible_mask = self.unpatchify(patch_mask)  # (N, C, T, H, W)
+        # Create patch_mask in patch space
+        patch_mask = torch.zeros(
+            (N, t * h * w), device=imgs.device, dtype=torch.float32
+        )
+        for idx in visible_patch_indices:
+            patch_mask[:, idx] = 1.0
 
-        # Apply optional base mask
-        if img_mask is not None:
-            visible_mask = visible_mask * img_mask
+        # Expand to include voxel content: (N, t*h*w, u*ph*pw*C)
+        patch_mask_expanded = patch_mask.unsqueeze(-1).expand(-1, -1, u * ph * pw * C)
+        visible_mask = self.unpatchify(patch_mask_expanded)
 
         return visible_mask
 
