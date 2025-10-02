@@ -16,6 +16,7 @@ from functools import partial
 
 import torch
 import torch.nn as nn
+from einops import rearrange
 from util import video_vit
 from util.logging import master_print as print
 
@@ -726,23 +727,30 @@ class MaskedAutoencoderViT(nn.Module):
             denoised_imgs: [N, C, T, H, W] denoised fmri volume
         """
         N, C, T, H, W = imgs.shape
+        # if samples is too high, there won't be enough visible patches.
+        assert 1 / (n_samples + 1) >= (1 - mask_ratio), (
+            "n_samples too large for mask_ratio"
+        )
 
         # get patch dimensions
-        T_patches = self.patch_embed.t_grid_size
-        H_patches = self.patch_embed.grid_size[0]
-        W_patches = self.patch_embed.grid_size[1]
-        # total_patches = T_patches * H_patches * W_patches - commented out because it's not used
+        h, w = self.patch_embed.grid_size
+        ph, pw = self.patch_embed.patch_size
 
         # we assume a shared img_mask for all samples for simplicity.
         if img_mask is not None:
-            assert img_mask.shape == (H_patches, W_patches), (
-                "invalid img_mask for denoising"
+            assert img_mask.squeeze().shape == (H, W), (
+                "denoising requires a fixed image mask"
             )
+            patch_mask = rearrange(
+                img_mask.squeeze(), "(h p) (w q) -> (h w) (p q)", h=h, p=ph, w=w, q=pw
+            )
+            patch_mask = patch_mask.sum(dim=-1).clip(max=1)
+            img_mask = img_mask.expand_as(imgs)
         else:
-            img_mask = torch.ones(H_patches, W_patches, device=imgs.device)
+            patch_mask = torch.ones(h * w, device=imgs.device)
 
         # generate random patch permutation (using generator for reproducibility)
-        valid_ids = img_mask.flatten().nonzero().flatten()
+        valid_ids = patch_mask.flatten().nonzero().flatten()
         patch_permutation = valid_ids[
             torch.randperm(len(valid_ids), generator=generator, device=valid_ids.device)
         ]
@@ -758,23 +766,18 @@ class MaskedAutoencoderViT(nn.Module):
                 imgs,
                 run_idx,
                 n_samples + 1,
-                img_mask,
                 patch_permutation,
-                T_patches,
-                H_patches,
-                W_patches,
             )
 
-            # run mae. note: masking_ratio is 0.0 since we are already choosing which patches to mask
             prefix, latent, mask, ids_keep = self.forward_encoder(
-                imgs, 0.0, run_visible_mask, generator
+                imgs, mask_ratio, run_visible_mask, generator
             )
             pred, decoder_mask = self.forward_decoder(
                 latent,
                 mask,
                 ids_keep,
                 decoder_mask_ratio=0.0,
-                img_mask=None,  # bypass temporal masking for explicit denoising
+                img_mask=img_mask,
                 generator=generator,
             )
 
@@ -796,12 +799,7 @@ class MaskedAutoencoderViT(nn.Module):
         weighted_sum = (stacked_reconstructions * weights).sum(dim=0)  # [N, L, D]
         weight_sum = weights.sum(dim=0)  # [N, L, 1]
 
-        # avoid division by zero: if no reconstructions, keep original (shouldn't happen)
-        final_patches = torch.where(
-            weight_sum > 0,
-            weighted_sum / weight_sum,
-            stacked_reconstructions[0],  # fallback to first reconstruction
-        )
+        final_patches = weighted_sum / weight_sum.clamp(min=1.0)
 
         # convert back to image space using unpatchify
         # need to call patchify with target frames to set correct patch_info for unpatchify
@@ -816,11 +814,7 @@ class MaskedAutoencoderViT(nn.Module):
         imgs,
         run_idx,
         total_runs,
-        img_mask,
         patch_permutation,
-        T_patches,
-        H_patches,
-        W_patches,
     ):
         """
         Partition-based visible mask with correct temporal handling.
@@ -837,22 +831,22 @@ class MaskedAutoencoderViT(nn.Module):
         # Use patch dimensions from the model configuration
         # Don't call patchify here as it overwrites patch_info
         ph, pw = self.patch_embed.patch_size
-        u = self.t_pred_patch_size  # Use prediction patch size
+        u = self.patch_embed.t_patch_size
         h = H // ph
         w = W // pw
         t = T // u
 
         # Create patch_mask in patch space
-        patch_mask = torch.zeros(
-            (N, t * h * w), device=imgs.device, dtype=torch.float32
-        )
-        for idx in visible_patch_indices:
-            patch_mask[:, idx] = 1.0
+        patch_mask = torch.zeros((N, h * w), device=imgs.device, dtype=torch.float32)
+        patch_mask[:, visible_patch_indices] = 1.0
+        patch_mask = patch_mask.unsqueeze(1).expand(-1, t, -1).flatten(1)
 
         # Expand to include voxel content: (N, t*h*w, u*ph*pw*C)
         patch_mask_expanded = patch_mask.unsqueeze(-1).expand(-1, -1, u * ph * pw * C)
 
         # Set patch_info for unpatchify
+        # bit of a hack to override the cached patch info here, but the caching itself
+        # is also a hack so..
         self.patch_info = (N, C, T, H, W, ph, pw, u, t, h, w)
         visible_mask = self.unpatchify(patch_mask_expanded)
 
