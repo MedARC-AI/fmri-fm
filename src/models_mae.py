@@ -834,9 +834,13 @@ class MaskedAutoencoderViT(nn.Module):
         groups = torch.tensor_split(patch_permutation, total_runs)
         visible_patch_indices = groups[run_idx]
 
-        # Call patchify to set self.patch_info
-        _ = self.patchify(imgs, predict=True)
-        N, C, T, H, W, ph, pw, u, t, h, w = self.patch_info
+        # Use patch dimensions from the model configuration
+        # Don't call patchify here as it overwrites patch_info
+        ph, pw = self.patch_embed.patch_size
+        u = self.t_pred_patch_size  # Use prediction patch size
+        h = H // ph
+        w = W // pw
+        t = T // u
 
         # Create patch_mask in patch space
         patch_mask = torch.zeros(
@@ -847,6 +851,9 @@ class MaskedAutoencoderViT(nn.Module):
 
         # Expand to include voxel content: (N, t*h*w, u*ph*pw*C)
         patch_mask_expanded = patch_mask.unsqueeze(-1).expand(-1, -1, u * ph * pw * C)
+
+        # Set patch_info for unpatchify
+        self.patch_info = (N, C, T, H, W, ph, pw, u, t, h, w)
         visible_mask = self.unpatchify(patch_mask_expanded)
 
         return visible_mask
