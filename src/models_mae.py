@@ -50,7 +50,7 @@ class MaskedAutoencoderViT(nn.Module):
         init_decoder_scale=None,
         mask_patch_embed=False,
         t_embed_patch_indices=None,
-        t_pred_patch_indices="0:None:4",
+        t_pred_patch_indices="0:16",
         **kwargs,
     ):
         super().__init__()
