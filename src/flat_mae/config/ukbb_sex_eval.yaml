@@ -1,0 +1,33 @@
+# Name of the run. For output directory and wandb.
+name: ukbb_sex_eval
+
+# Prediction task
+#   - classification
+#   - regression
+task: classification
+
+# Datasets
+datasets:
+  ukbb-train:
+    root: datasets/flat-clips/ukbb-train-clips-16t
+    shuffle: true
+
+  ukbb-val:
+    root: datasets/flat-clips/ukbb-val-clips-16t
+    shuffle: false
+
+  ukbb-test:
+    root: datasets/flat-clips/ukbb-test-clips-16t
+    shuffle: false
+
+# Dataset names for special subsets.
+train_dataset: ukbb-train
+val_dataset: ukbb-val
+test_dataset: ukbb-test
+
+# Target ID map, if not already in the samples.
+target_id_map: datasets/ukbb_sex_target_id_map.json
+target_key: sub
+
+# Number of target classes for classification, or target dimension for regression.
+num_classes: 2

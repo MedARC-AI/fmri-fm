@@ -1,0 +1,11 @@
+name: debug_pretrain_mae
+
+model: mae_vit_small
+
+train_dataset: hcp-train
+eval_datasets: [hcp-val]
+
+epochs: 5
+num_workers: 0
+debug: true
+wandb: false

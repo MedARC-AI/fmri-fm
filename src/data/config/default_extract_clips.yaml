@@ -1,0 +1,126 @@
+num_frames: 16
+output_dir: datasets/flat-clips
+seed: 7293
+num_workers: 4
+
+datasets:
+  hcp-train-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{0000..0009}.tar
+    clipping: random
+
+  hcp-val-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{1800..1809}.tar
+    clipping: random
+
+  nsd-subj01-clips-16t:
+    url: datasets/nsd-flat/nsd-flat_{0000..0009}.tar
+    clipping: random
+
+  hcp-train-task-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{0000..1799}.tar
+    clipping: event
+    target_id_map: datasets/hcp_trial_type_target_id_map.json
+
+  hcp-val-task-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{1800..1899}.tar
+    clipping: event
+    target_id_map: datasets/hcp_trial_type_target_id_map.json
+
+  hcp-test-task-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{1900..1999}.tar
+    clipping: event
+    target_id_map: datasets/hcp_trial_type_target_id_map.json
+
+  # NSD shard ranges for each subject:
+  #
+  #   subj01 0000..0039
+  #   subj02 0040..0079
+  #   subj03 0080..0111
+  #   subj04 0112..0141
+  #   subj05 0142..0181
+  #   subj06 0182..0213
+  #   subj07 0214..0253
+  #   subj08 0254..0283
+
+  # Subjects 1-3, 5-8
+  # 12 sessions per subject, ~60k trials
+  nsd-train-task-clips-16t:
+    url:
+      - datasets/nsd-flat/nsd-flat_{0000..0011}.tar
+      - datasets/nsd-flat/nsd-flat_{0040..0051}.tar
+      - datasets/nsd-flat/nsd-flat_{0080..0091}.tar
+      - datasets/nsd-flat/nsd-flat_{0142..0153}.tar
+      - datasets/nsd-flat/nsd-flat_{0182..0193}.tar
+      - datasets/nsd-flat/nsd-flat_{0214..0225}.tar
+      - datasets/nsd-flat/nsd-flat_{0254..0265}.tar
+    clipping: event
+    target_id_map: datasets/nsd_coco_73k_semantic_cluster_ids.npy
+    target_key: nsd_id
+
+  # Subjects 1-3, 5-8
+  # 2 sessions per subject, ~10k trials
+  nsd-val-task-clips-16t:
+    url:
+      - datasets/nsd-flat/nsd-flat_{0012..0013}.tar
+      - datasets/nsd-flat/nsd-flat_{0052..0053}.tar
+      - datasets/nsd-flat/nsd-flat_{0092..0093}.tar
+      - datasets/nsd-flat/nsd-flat_{0154..0155}.tar
+      - datasets/nsd-flat/nsd-flat_{0194..0195}.tar
+      - datasets/nsd-flat/nsd-flat_{0226..0227}.tar
+      - datasets/nsd-flat/nsd-flat_{0266..0267}.tar
+    clipping: event
+    target_id_map: datasets/nsd_coco_73k_semantic_cluster_ids.npy
+    target_key: nsd_id
+
+  # Subjects 1-3, 5-8
+  # 2 sessions per subject, ~10k trials
+  nsd-test-task-clips-16t:
+    url:
+      - datasets/nsd-flat/nsd-flat_{0014..0015}.tar
+      - datasets/nsd-flat/nsd-flat_{0054..0055}.tar
+      - datasets/nsd-flat/nsd-flat_{0094..0095}.tar
+      - datasets/nsd-flat/nsd-flat_{0156..0157}.tar
+      - datasets/nsd-flat/nsd-flat_{0196..0197}.tar
+      - datasets/nsd-flat/nsd-flat_{0228..0229}.tar
+      - datasets/nsd-flat/nsd-flat_{0268..0269}.tar
+    clipping: event
+    target_id_map: datasets/nsd_coco_73k_semantic_cluster_ids.npy
+    target_key: nsd_id
+
+  # First 10 shards of OOD subject 4
+  nsd-test-ood-task-clips-16t:
+    url: datasets/nsd-flat/nsd-flat_{0112..0121}.tar
+    clipping: event
+    target_id_map: datasets/nsd_coco_73k_semantic_cluster_ids.npy
+    target_key: nsd_id
+
+  hcp-train-rest-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{0000..1799}.tar
+    clipping: random
+    clipping_kwargs:
+      oversample: 0.33
+    select_files_pattern: "*mod-rfMRI*"
+
+  hcp-val-rest-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{1800..1899}.tar
+    clipping: random
+    clipping_kwargs:
+      oversample: 0.33
+    select_files_pattern: "*mod-rfMRI*"
+
+  hcp-train-rest1-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{0000..1799}.tar
+    clipping: random
+    clipping_kwargs:
+      oversample: 0.66
+    select_files_pattern: "*task-REST1*"
+
+  hcp-train-rest2-clips-16t:
+    url: datasets/hcp-flat/hcp-flat_{0000..1799}.tar
+    clipping: random
+    clipping_kwargs:
+      oversample: 0.66
+    select_files_pattern: "*task-REST2*"
+
+# By default generate all datasets.
+include_datasets: null
