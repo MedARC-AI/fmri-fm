@@ -37,45 +37,41 @@ A (growing) list of our past and current contributors:
 [@yuxiangwei0808](https://github.com/yuxiangwei0808).
 Thank you! 🤗
 
-
 ## Project overview
 
-We are still in the early stages of figuring out how to model brain activity with deep networks. Our general strategy in this project is to broadly explore the space of possible approaches to discover what works best. We are currently focused on two orthogonal axes: **input data representation**, and **self-supervised learning objective**. In support of both these directions, we are also working in parallel to build a solid shared **infrastructure** for training SOTA fMRI foundation models.
-
-### Data representation
-
-Modern neural network architectures (i.e. transformers) expect a sequence of embedding vectors as input. A key question is how to format or "tokenize" the native 4D volumetric fMRI data into this embedding sequence. Most current approaches use either parcellation based averaging [[Brain-JEPA](https://openreview.net/forum?id=gtU2eLSAmO), [BrainLM](https://openreview.net/forum?id=RwI7ZEfR27)] or 4D volume convolution [[SwiFT](https://proceedings.neurips.cc/paper_files/paper/2023/hash/8313b1920ee9c78d846c5798c1ce48be-Abstract-Conference.html), [NeuroStorm](https://arxiv.org/abs/2506.11167)].
+A key question for building fMRI foundation models is how to format or "tokenize" the native 4D volumetric fMRI data for model input. Most current approaches use either parcellation based averaging [[Brain-JEPA](https://openreview.net/forum?id=gtU2eLSAmO), [BrainLM](https://openreview.net/forum?id=RwI7ZEfR27)] or 4D volume convolution [[SwiFT](https://proceedings.neurips.cc/paper_files/paper/2023/hash/8313b1920ee9c78d846c5798c1ce48be-Abstract-Conference.html), [NeuroStorm](https://arxiv.org/abs/2506.11167)]. Our current work [[fm-MAE](https://arxiv.org/abs/2510.13768)] uses a novel [flat map](https://www.frontiersin.org/journals/neuroinformatics/articles/10.3389/fninf.2015.00023/full) based representation that is in between the two along the "bitter lesson continuum": more information rich than parcellation approaches, yet more structured than native 4D volume approaches.
 
 <p align="center">
   <img src=".github/fMRI data representation.svg" width="600">
 </p>
 
-Our current work [[fm-MAE](https://arxiv.org/abs/2510.13768)] has focused on [flat maps](https://www.frontiersin.org/journals/neuroinformatics/articles/10.3389/fninf.2015.00023/full) as an alternative representation that is in between the two along the "bitter lesson continuum" (more information rich than parcellation approaches, more structured than native 4D volume approaches). But there are many more data representations that we are interested in exploring:
+Another important axis for fMRI foundation models is the self-supervised learning objective. For our initial work, we picked the [MAE](https://arxiv.org/abs/2205.09113) objective for its simplicity.
+
+<p align="center">
+  <img src=".github/fm-MAE.svg" width="600">
+</p>
+
+### Roadmap
+
+Beyond flat maps, there are several other tokenization strategies we are interested in exploring:
 
 - "vector" parcellation embeddings (cf [[Feng et al., 2025](https://arxiv.org/abs/2509.23566)])
 - native surface mesh tokenization (cf [[Yu et al., 2025](https://arxiv.org/abs/2507.16389)])
 - *sparse* gray matter only 4D volume patch embedding
 
-### Self-supervised learning objectives
+Beyond MAE, there are many different types of SSL objectives we could try:
 
-There are now many available approaches for training self-supervised models on image data:
+- Contrastive: [[SimCLR](https://arxiv.org/abs/2002.05709)]
+- Self-distillation: [[SimSiam](https://arxiv.org/abs/2011.10566), [DINO](https://arxiv.org/abs/2104.14294)([v2](https://arxiv.org/abs/2304.07193),[v3](https://arxiv.org/abs/2508.10104)), [JEPA](https://arxiv.org/abs/2301.08243)]
+- Reconstructive: [[AIM](https://arxiv.org/abs/2401.08541), [l-DAE](https://arxiv.org/abs/2401.14404)]
+- Masked image modeling: [[CAPI](https://arxiv.org/abs/2502.08769)]
 
-- Contrastive: [[SimCLR](https://arxiv.org/abs/2002.05709), [MoCo](https://arxiv.org/abs/1911.05722)]
-- Self-distillation: [[SwAV](https://arxiv.org/abs/2006.09882), [BYOL](https://arxiv.org/abs/2006.07733), [SimSiam](https://arxiv.org/abs/2011.10566), [DINO](https://arxiv.org/abs/2104.14294)([v2](https://arxiv.org/abs/2304.07193),[v3](https://arxiv.org/abs/2508.10104)), [I-JEPA](https://arxiv.org/abs/2301.08243)]
-- Reconstructive: [[iGPT](https://proceedings.mlr.press/v119/chen20s.html), [AIM](https://arxiv.org/abs/2401.08541), [l-DAE](https://arxiv.org/abs/2401.14404)]
-- Masked image modeling: [[BEiT](https://arxiv.org/abs/2106.08254), [MAE](https://arxiv.org/abs/2111.06377), [iBOT](https://arxiv.org/abs/2111.07832), [Data2Vec](https://arxiv.org/abs/2202.03555), [CAPI](https://arxiv.org/abs/2502.08769)]
-
-
-Previous works on fMRI foundation models have explored MAE-style masked reconstruction objectives [[BrainLM](https://openreview.net/forum?id=RwI7ZEfR27)] and JEPA objectives [[Brain-JEPA](https://openreview.net/forum?id=gtU2eLSAmO)]. In our current work [[fm-MAE](https://arxiv.org/abs/2510.13768)], we chose MAE for its simplicity. But we view this largely as a baseline, and expect performance improvements from incorporating aspects from SOTA vision SSL methods (e.g. DINOv2, CAPI).
-
-### Infrastructure
-
-Alongside these two axes of exploration, there is a lot of fundamental work to do to set up a solid infrastructure for training fMRI foundation models:
+There is also a lot of work to do to set up a solid infrastructure for training and evaluating SOTA fMRI foundation models:
 
 - assembling diverse large-scale pretraining datasets
-- establishing reproducible benchmarks (especially clinical benchmarks)
+- establishing reproducible benchmarks
 - developing methods to interpret models' learned representations
-- optimizing model training and inference (especially data loading)
+- optimizing model training and inference
 
 ## Installation
 
