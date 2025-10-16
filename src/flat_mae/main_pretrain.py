@@ -1,6 +1,6 @@
 # This source code is licensed under the Apache License, Version 2.0
 #
-# Referenences:
+# References:
 # deit: https://github.com/facebookresearch/deit/blob/main/main.py
 # capi: https://github.com/facebookresearch/capi/blob/main/train_capi.py
 
