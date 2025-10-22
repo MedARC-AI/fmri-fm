@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
     "datasets",
     "einops",
-    "huggingface_hub",
+    "huggingface-hub[hf-transfer]",
     "ipython",
     "jaxtyping",
     "jupyter",
@@ -21,7 +21,7 @@ dependencies = [
     "numpy",
     "omegaconf",
     "pre-commit",
-    "pydantic<2.7",  # silence pydantic v2 warning
+    "pydantic",
     "pytest",
     "pycortex",
     "scikit-learn",

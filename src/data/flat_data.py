@@ -20,7 +20,7 @@ import torchvision.tv_tensors as tvt
 import scipy.sparse
 import webdataset as wds
 from torch.utils.data import Dataset
-
+from huggingface_hub.utils import get_token
 
 def make_flat_wds_dataset(
     url: str | list[str],
@@ -32,6 +32,7 @@ def make_flat_wds_dataset(
     select_files_pattern: str | None = None,
     shuffle: bool = True,
     buffer_size: int = 1000,
+    stream_hf: bool = False,
 ) -> wds.WebDataset:
     """Make fMRI flat map dataset."""
     if select_files_pattern:
@@ -42,6 +43,10 @@ def make_flat_wds_dataset(
     # resampling creates an infinite stream of shards sampled with replacement,
     # guaranteeing that no process runs out of data early in distributed training.
     # see webdataset FAQ: https://github.com/webdataset/webdataset/blob/main/FAQ.md
+    if stream_hf:
+        hf_token = get_token()
+        assert hf_token, "No HF token found; run hf auth login"
+        url = f"pipe:curl -s -L {url} -H 'Authorization:Bearer {hf_token}'"
     dataset = wds.WebDataset(
         expand_urls(url),
         resampled=shuffle,
