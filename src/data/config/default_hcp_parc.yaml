@@ -1,0 +1,25 @@
+# Source and output dataset paths.
+hcp_1200_dir: datasets/HCP_1200
+out_dir: datasets/hcp-parc-v2
+
+# The restricted CSV contains the family ID, used for splitting the data into batches.
+# This is not publicly available and must be requested from HCP.
+hcp_restricted_csv: datasets/HCP_1200/hcp_1200_restricted.csv
+
+# Shard config. Total shards are split into batches, and each batch contains a fixed set
+# of subjects. This way, we can split by batch and have held out subjects. Within a
+# batch, all files are shuffled.
+num_shards: 2000
+num_batches: 20
+
+# Fixed random seed for shuffling runs.
+seed: 2912
+
+# Parcellation
+parcellation_path: datasets/Schaefer2018_400Parcels_17Networks_order_Tian_Subcortex_S3.dlabel.nii
+
+# Overwrite existing results.
+overwrite: false
+
+# Logging level.
+log_level: INFO

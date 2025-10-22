@@ -11,6 +11,7 @@ Includes utils for:
 - resampling time series to fixed TR
 - loading cifti surface data
 - resampling data from fsaverage to 32k_fs_LR
+- computing parcellated time series
 """
 
 import math
@@ -28,6 +29,7 @@ from matplotlib.tri import Triangulation
 from nibabel.cifti2 import BrainModelAxis
 from nibabel.cifti2.cifti2 import Cifti2Image
 from scipy.spatial import Delaunay
+from scipy.sparse import csr_array
 from sklearn.neighbors import NearestNeighbors
 
 
@@ -490,3 +492,58 @@ def fsaverage_to_32k_fs_LR(
             data = np.squeeze(data, 0)
 
     return data
+
+
+def parc_to_one_hot(parc: np.ndarray, sparse: bool = True) -> np.ndarray:
+    """Get one hot encoding of the parcellation.
+
+    Args:
+        parc: parcellation of shape (num_vertices,) with values in [0, num_rois] where 0
+            is background.
+
+    Returns:
+        parc_one_hot: one hot encoding of parcellation, shape (num_vertices, num_rois).
+    """
+    (num_verts,) = parc.shape
+    parc = parc.astype(np.int32)
+    num_rois = parc.max()
+
+    # one hot parcellation matrix, shape (num_vertices, num_rois)
+    if sparse:
+        mask = parc > 0
+        (row_ind,) = mask.nonzero()
+        col_ind = parc[mask] - 1
+        values = np.ones(len(row_ind), dtype=np.float32)
+        parc_one_hot = csr_array((values, (row_ind, col_ind)), shape=(num_verts, num_rois))
+    else:
+        parc_one_hot = parc[:, None] == np.arange(1, num_rois + 1)
+        parc_one_hot = parc_one_hot.astype(np.float32)
+    return parc_one_hot
+
+
+def parcellate_timeseries(
+    series: np.ndarray, parc_one_hot: np.ndarray, eps: float = 1e-6
+) -> np.ndarray:
+    """Extract parcellated time series.
+
+    Args:
+        series: full time series (num_samples, num_vertices)
+        parc_one_hot: one hot encoding of parcellation (num_vertices, num_rois)
+
+    Returns:
+        parc_series: parcellated time series (num_samples, num_rois)
+    """
+    parc_one_hot = parc_one_hot.astype(series.dtype)
+
+    # don't include verts with missing data
+    data_mask = np.var(series, axis=0) > eps
+    parc_one_hot = parc_one_hot * data_mask[:, None]
+
+    # normalize weights to sum to 1
+    # Nb, empty parcels will be all zero
+    parc_counts = np.asarray(parc_one_hot.sum(axis=0))
+    parc_one_hot = parc_one_hot / np.maximum(parc_counts, 1)
+
+    # per roi averaging
+    parc_series = series @ parc_one_hot
+    return parc_series
