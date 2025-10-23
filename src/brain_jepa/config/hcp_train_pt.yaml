@@ -1,0 +1,74 @@
+# HCP Parcellated Training Config (Pre-extracted .pt files)
+# Run extraction pipeline first:
+#   bash src/brain_jepa/preprocessing/run_hcp_extraction.sh
+
+data:
+  batch_size: 32
+  crop_size:
+  - 400  # 400 cortical ROIs (Schaefer atlas)
+  - 160  
+  num_workers: 8
+  pin_mem: true
+  gradient_csv_path: 'src/brain_jepa/gradient_mapping_400.csv'
+
+logging:
+  folder: 'logs/hcp_pretrain_pt'
+  write_tag: 'jepa'
+
+mask:
+  allow_overlap: false
+  patch_size: 16 
+  min_keep: 4
+  enc_mask_scale:
+  - 0.84
+  - 1.0
+  pred_mask_R_scale:
+  - 0.45
+  - 0.6
+  pred_mask_T_roi_scale:
+  - 0.2
+  - 0.6
+  pred_mask_R_roi_scale:
+  - 0.15
+  - 0.3
+  pred_mask_T_scale:
+  - 0.0
+  - 0.4
+
+meta:
+  load_checkpoint: false
+  model_name: 'vit_small'
+  pred_depth: 6
+  pred_emb_dim: 384
+  read_checkpoint: null
+  use_bfloat16: true
+  accumulation_steps: 4
+  attn_mode: 'normal'  # Changed from flash_attn
+  add_w: 'mapping'
+  downsample: false
+  mask_mode: 'roi_mask'
+  use_standatdization: false 
+  
+  # HCP-specific: use PT loader
+  dataset_type: 'hcp_pt'
+  pt_dir: '/teamspace/gcs_folders/share/fmri-fm/brain-jepa/hcp-parc'
+  
+  # Wandb logging
+  use_wandb: true
+  wandb_project: 'brain-jepa-pretrain'
+  wandb_entity: shamussim
+  wandb_run_name: pretrain-drop-those-shorter-160frames
+
+optimization:
+  ema:
+  - 0.996
+  - 1.0
+  epochs: 300 # default 300
+  final_lr: 1.0e-06
+  final_weight_decay: 0.4
+  ipe_scale: 1.0
+  lr: 0.001
+  start_lr: 0.00005
+  warmup: 40 #default 40
+  weight_decay: 0.04
+
