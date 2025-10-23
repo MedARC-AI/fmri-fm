@@ -46,7 +46,7 @@ def make_flat_wds_dataset(
     if stream_hf:
         hf_token = get_token()
         assert hf_token, "No HF token found; run hf auth login"
-        url = f"pipe:curl -s -L {url} -H 'Authorization:Bearer {hf_token}'"
+        url = f"pipe:curl -s -L {url} -H 'Authorization:Bearer {hf_token}' --retry 10 --retry-delay 1 --retry-max-time 60 --retry-all-errors"
     dataset = wds.WebDataset(
         expand_urls(url),
         resampled=shuffle,
