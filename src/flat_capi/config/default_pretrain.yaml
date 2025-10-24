@@ -1,0 +1,134 @@
+# Name of the run. For output directory and wandb.
+name: pretrain_capi_hcp_defaults_random_crop
+
+# Description of the run. Goes in wandb notes.
+notes: capi_model_defaults, random_crop, weight_decay_0.1, layernorm_wd_0.0, bs=128, lr=1.0e-3, ncls=16384, time_as_channels=true, ps=14, mask_ratio=0.75, pred_subsampling=0.05
+
+# Root output directory
+output_dir: checkpoints
+seed: 7338
+start_epoch: 0
+
+# Path to checkpoint to resume training.
+resume: null
+
+# Model
+model: vit_l14_capi
+
+# Standard image size of fmri flat datasets.
+img_size: [224, 560]
+in_chans: 1
+capi:
+  num_clusters: 16384
+  student_temp: 0.12
+  clustering_kwargs:
+    target_temp: 0.06
+    pred_temp: 0.12
+    n_sk_iter: 3
+    bias: true
+  clustering_optimizer:
+    name: AdamW
+    kwargs:
+      betas: [0.9, 0.95]
+      weight_decay: 0.05
+    lr_schedule:
+      base_value: 5.0e-4
+      final_value: 0.0
+      warmup_iters: 50000
+      truncate_cos: 1.0
+
+# Temporal/video settings
+num_frames: 16
+time_as_channels: true
+select_frame_index: 0
+
+# Masking/generation params for indices building
+mask_ratio: 0.75
+prediction_subsampling: 0.05
+patch_size: 14
+
+# Optimization
+epochs: 500
+batch_size: 128
+accum_iter: 1
+base_lr: 1.0e-4 # scaled acc to effective bs (ref bs=256); fallback val; overriden for CAPI expts
+min_lr: 0.0
+warmup_epochs: 50 # at bs=96, this is 52050 steps
+lr_schedule:
+  base_value: 0.001 # overrides base_lr
+  final_value: 0.0
+  warmup_iters: 50000
+  freeze_iters: 0
+  truncate_cos: 1.0
+weight_decay: 0.1
+beta: [0.9, 0.95]
+clip_grad: 1.0
+precision: bf16
+
+# Optim multipliers
+patch_embed_lr_mult: 0.2
+rope_lr_mult: 0.0
+layernorm_wd_mult: 0.0
+
+# Momentum schedule (EMA)
+momentum_schedule:
+  start_warmup_value: 1.0
+  base_value: 0.999
+  final_value: 1.0
+  freeze_iters: 0
+  truncate_cos: 1.0
+  warmup_iters: 50000
+
+# Datasets (maintain archived paths)
+datasets:
+  train:
+    type: flat-wds
+    url: /teamspace/r2_connections/medarc/fmri-fm/datasets/hcp-flat/hcp-flat_{0000..1799}.tar
+    clipping: random
+    clipping_kwargs:
+      oversample: 4.0
+    shuffle: true
+    samples_per_epoch: 200000
+
+  val_train:
+    type: flat-clips
+    root: /teamspace/r2_connections/medarc/fmri-fm/datasets/flat-clips/hcp-train-clips-16t
+    shuffle: false
+
+  val_hcp:
+    type: flat-clips
+    root: /teamspace/r2_connections/medarc/fmri-fm/datasets/flat-clips/hcp-val-clips-16t
+    shuffle: false
+
+  val_nsd:
+    type: flat-clips
+    root: /teamspace/r2_connections/medarc/fmri-fm/datasets/flat-clips/nsd-subj01-clips-16t
+    shuffle: false
+
+# Data transform (same defaults as MAE, with bbox/masking available via overrides)
+clip_vmax: 3.0
+normalize: frame
+bbox: null
+random_crop: true
+crop_kwargs:
+  scale: [0.6, 1.0]
+  ratio: [2.5, 2.5]
+  interpolation: 3
+
+# Data loader
+num_workers: 16
+
+checkpoint_period: 10
+max_checkpoints: null
+
+# Logging cadence/config
+log_metrics_unit: step
+log_metrics_cadence: 1
+
+wandb: true
+wandb_entity: null
+wandb_project: fMRI-foundation-model
+debug: false
+device: cuda
+
+
