@@ -1,0 +1,414 @@
+import builtins
+import datetime
+import os
+import subprocess
+import time
+from collections import defaultdict, deque
+from pathlib import Path
+
+import numpy as np
+import torch
+import torch.distributed as dist
+from omegaconf import OmegaConf
+
+
+class SmoothedValue:
+    """Track a series of values and provide access to smoothed values over a
+    window or the global series average.
+    """
+
+    def __init__(self, window_size=20, fmt=None):
+        if fmt is None:
+            fmt = "{median:.4f} ({global_avg:.4f})"
+        self.deque = deque(maxlen=window_size)
+        self.total = 0.0
+        self.count = 0
+        self.fmt = fmt
+
+    def update(self, value, n=1):
+        self.deque.append(float(value))
+        self.count += n
+        self.total += value * n
+
+    def synchronize_between_processes(self):
+        if not is_dist_avail_and_initialized():
+            return
+        t = torch.tensor([self.count, self.total], dtype=torch.float64, device="cuda")
+        dist.barrier()
+        dist.all_reduce(t)
+        t = t.tolist()
+        self.count = int(t[0])
+        self.total = t[1]
+
+    @property
+    def median(self):
+        if not self.count:
+            return float("nan")
+        d = torch.tensor(list(self.deque))
+        return d.median().item()
+
+    @property
+    def avg(self):
+        if not self.count:
+            return float("nan")
+        d = torch.tensor(list(self.deque), dtype=torch.float32)
+        return d.mean().item()
+
+    @property
+    def global_avg(self):
+        if not self.count:
+            return float("nan")
+        return self.total / self.count
+
+    @property
+    def max(self):
+        if not self.count:
+            return float("nan")
+        return max(self.deque)
+
+    @property
+    def value(self):
+        if not self.count:
+            return float("nan")
+        return self.deque[-1]
+
+    def __str__(self):
+        return self.fmt.format(
+            median=self.median,
+            avg=self.avg,
+            global_avg=self.global_avg,
+            max=self.max,
+            value=self.value,
+        )
+
+
+class MetricLogger:
+    def __init__(self, delimiter="\t"):
+        self.meters = defaultdict(SmoothedValue)
+        self.delimiter = delimiter
+
+    def update(self, **kwargs):
+        for k, v in kwargs.items():
+            if v is None:
+                continue
+            if isinstance(v, (torch.Tensor, np.generic)):
+                v = v.item()
+            assert isinstance(v, (float, int))
+            self.meters[k].update(v)
+
+    def __getattr__(self, attr):
+        if attr in self.meters:
+            return self.meters[attr]
+        if attr in self.__dict__:
+            return self.__dict__[attr]
+        raise AttributeError("'{}' object has no attribute '{}'".format(type(self).__name__, attr))
+
+    def __str__(self):
+        loss_str = []
+        for name, meter in self.meters.items():
+            loss_str.append("{}: {}".format(name, str(meter)))
+        return self.delimiter.join(loss_str)
+
+    def synchronize_between_processes(self):
+        for meter in self.meters.values():
+            meter.synchronize_between_processes()
+
+    def add_meter(self, name, meter):
+        self.meters[name] = meter
+
+    def log_every(self, iterable, print_freq, header=None, total_steps=None):
+        i = 0
+        total_steps = total_steps or len(iterable)
+        if not header:
+            header = ""
+        start_time = time.time()
+        end = time.time()
+        iter_time = SmoothedValue(fmt="{avg:.4f}")
+        data_time = SmoothedValue(fmt="{avg:.4f}")
+        space_fmt = ":" + str(len(str(total_steps))) + "d"
+        log_msg = [
+            header,
+            "[{0" + space_fmt + "}/{1}]",
+            "eta: {eta}",
+            "{meters}",
+            "time: {time}",
+            "data: {data}",
+        ]
+        if torch.cuda.is_available():
+            log_msg.append("max mem: {memory:.0f}")
+        log_msg = self.delimiter.join(log_msg)
+        MB = 1024.0 * 1024.0
+        for obj in iterable:
+            data_time.update(time.time() - end)
+            yield obj
+            iter_time.update(time.time() - end)
+            if i % print_freq == 0 or i == total_steps - 1:
+                eta_seconds = iter_time.global_avg * (total_steps - i)
+                eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
+                if torch.cuda.is_available():
+                    print(
+                        log_msg.format(
+                            i,
+                            total_steps,
+                            eta=eta_string,
+                            meters=str(self),
+                            time=str(iter_time),
+                            data=str(data_time),
+                            memory=torch.cuda.max_memory_allocated() / MB,
+                        )
+                    )
+                else:
+                    print(
+                        log_msg.format(
+                            i,
+                            total_steps,
+                            eta=eta_string,
+                            meters=str(self),
+                            time=str(iter_time),
+                            data=str(data_time),
+                        )
+                    )
+            i += 1
+            end = time.time()
+        total_time = time.time() - start_time
+        total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+        print("{} Total time: {} ({:.4f} s / it)".format(header, total_time_str, total_time / total_steps))
+
+
+def setup_for_distributed(is_master: bool):
+    builtin_print = builtins.print
+
+    def print(*args, **kwargs):
+        force = kwargs.pop("force", False)
+        force = force or (get_world_size() > 8)
+        if is_master or force:
+            now = datetime.datetime.now().time()
+            builtin_print("[{}] ".format(now), end="")
+            builtin_print(*args, **kwargs)
+
+    builtins.print = print
+
+
+def is_dist_avail_and_initialized():
+    if not dist.is_available():
+        return False
+    if not dist.is_initialized():
+        return False
+    return True
+
+
+def get_world_size():
+    if not is_dist_avail_and_initialized():
+        return 1
+    return dist.get_world_size()
+
+
+def get_rank():
+    if not is_dist_avail_and_initialized():
+        return 0
+    return dist.get_rank()
+
+
+def is_main_process():
+    return get_rank() == 0
+
+
+def save_on_master(state, path):
+    if is_main_process():
+        print(f"save path {path}")
+        torch.save(state, path)
+
+
+def init_distributed_mode(args):
+    if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
+        args.rank = int(os.environ["RANK"])
+        args.world_size = int(os.environ["WORLD_SIZE"])
+        args.gpu = int(os.environ["LOCAL_RANK"])
+    else:
+        print("Not using distributed mode")
+        setup_for_distributed(is_master=True)
+        args.distributed = False
+        return
+
+    args.distributed = True
+
+    torch.cuda.set_device(args.gpu)
+    args.dist_backend = "nccl"
+    print(f"| distributed init (rank {args.rank}): gpu {args.gpu}")
+    torch.distributed.init_process_group(
+        backend=args.dist_backend,
+        world_size=args.world_size,
+        rank=args.rank,
+    )
+    torch.distributed.barrier()
+    setup_for_distributed(args.rank == 0)
+
+
+class NativeScalerWithGradNormCount:
+    state_dict_key = "amp_scaler"
+
+    def __init__(self, fp32=False):
+        self._scaler = torch.GradScaler(enabled=not fp32)
+
+    def __call__(
+        self,
+        loss,
+        optimizer,
+        clip_grad=None,
+        parameters=None,
+        create_graph=False,
+        update_grad=True,
+    ):
+        self._scaler.scale(loss).backward(create_graph=create_graph)
+
+        if parameters is None:
+            parameters = [p for group in optimizer.param_groups for p in group["params"]]
+
+        if update_grad:
+            # unscale the gradients of optimizer's assigned params in-place
+            self._scaler.unscale_(optimizer)
+            if clip_grad is not None:
+                norm = torch.nn.utils.clip_grad_norm_(parameters, clip_grad)
+            else:
+                norm = get_grad_norm_(parameters)
+            self._scaler.step(optimizer)
+            self._scaler.update()
+        else:
+            norm = None
+        return norm
+
+    def state_dict(self):
+        return self._scaler.state_dict()
+
+    def load_state_dict(self, state_dict):
+        self._scaler.load_state_dict(state_dict)
+
+
+def get_grad_norm_(parameters, norm_type: float = 2.0) -> torch.Tensor:
+    if isinstance(parameters, torch.Tensor):
+        parameters = [parameters]
+    parameters = [p for p in parameters if p.grad is not None]
+    norm_type = float(norm_type)
+    if len(parameters) == 0:
+        return torch.tensor(0.0)
+    device = parameters[0].grad.device
+    if norm_type == float("inf"):
+        total_norm = max(p.grad.detach().abs().max().to(device) for p in parameters)
+    else:
+        total_norm = torch.norm(
+            torch.stack([torch.norm(p.grad.detach(), norm_type).to(device) for p in parameters]),
+            norm_type,
+        )
+    return total_norm
+
+
+def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler, clustering_optimizer=None):
+    checkpoint_path = f"{args.output_dir}/checkpoint-{epoch:05d}.pth"
+    last_checkpoint_path = f"{args.output_dir}/checkpoint-last.pth"
+
+    to_save = {
+        "model": model_without_ddp.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "epoch": epoch,
+        "scaler": loss_scaler.state_dict(),
+        "args": OmegaConf.to_container(args),
+    }
+    if clustering_optimizer is not None:
+        try:
+            to_save["clustering_optimizer"] = clustering_optimizer.state_dict()
+        except Exception:
+            pass
+
+    save_on_master(to_save, last_checkpoint_path)
+    if getattr(args, "checkpoint_period", None) and (epoch % args.checkpoint_period == 0):
+        save_on_master(to_save, checkpoint_path)
+    return last_checkpoint_path
+
+
+def cleanup_checkpoints(args):
+    if getattr(args, "max_checkpoints", None) and is_main_process():
+        output_dir = Path(args.output_dir)
+        checkpoints = sorted(output_dir.glob("checkpoint-[0-9]*.pth"))
+        trim_count = max(0, len(checkpoints) - int(args.max_checkpoints))
+        for path in checkpoints[:trim_count]:
+            try:
+                path.unlink()
+            except Exception:
+                pass
+
+
+def get_last_checkpoint(args):
+    d = args.output_dir
+    output_dir = Path(d)
+    if not output_dir.exists():
+        print("No checkpoints found in '{}'".format(d))
+        return None
+    names = [p.name for p in output_dir.iterdir() if p.is_file() and "checkpoint" in p.name]
+    if len(names) == 0:
+        print("No checkpoints found in '{}'".format(d))
+        return None
+    name = sorted(names)[-1]
+    return str(output_dir / name)
+
+
+def load_model(args, model_without_ddp, optimizer, loss_scaler, clustering_optimizer=None):
+    if not getattr(args, "resume", None):
+        args.resume = get_last_checkpoint(args)
+    if args.resume:
+        if str(args.resume).startswith("https"):
+            checkpoint = torch.hub.load_state_dict_from_url(args.resume, map_location="cpu", check_hash=True)
+        else:
+            checkpoint = torch.load(args.resume, map_location="cpu", weights_only=True)
+        model_without_ddp.load_state_dict(checkpoint["model"])
+        print("Resume checkpoint %s" % args.resume)
+        if ("optimizer" in checkpoint) and ("epoch" in checkpoint) and not (hasattr(args, "eval") and args.eval):
+            optimizer.load_state_dict(checkpoint["optimizer"])
+            args.start_epoch = checkpoint["epoch"] + 1
+            if "scaler" in checkpoint and loss_scaler is not None:
+                loss_scaler.load_state_dict(checkpoint["scaler"])
+            if clustering_optimizer is not None and "clustering_optimizer" in checkpoint:
+                try:
+                    clustering_optimizer.load_state_dict(checkpoint["clustering_optimizer"])
+                except Exception:
+                    pass
+            print("With optim & sched!")
+
+
+def all_reduce_mean(x):
+    world_size = get_world_size()
+    if world_size > 1:
+        is_item = not isinstance(x, torch.Tensor)
+        if is_item:
+            x_reduce = torch.tensor(x).cuda()
+        else:
+            x_reduce = x.detach().clone()
+        dist.all_reduce(x_reduce)
+        x_reduce /= world_size
+        if is_item:
+            x_reduce = x_reduce.item()
+        return x_reduce
+    else:
+        return x
+
+
+def get_sha():
+    cwd = os.path.dirname(os.path.abspath(__file__))
+
+    def _run(command):
+        return subprocess.check_output(command, cwd=cwd).decode("ascii").strip()
+
+    sha = "N/A"
+    diff = "clean"
+    branch = "N/A"
+    try:
+        sha = _run(["git", "rev-parse", "HEAD"])
+        subprocess.check_output(["git", "diff"], cwd=cwd)
+        diff = _run(["git", "diff-index", "HEAD"])
+        diff = "has uncommitted changes" if diff else "clean"
+        branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+    except Exception:
+        pass
+    message = f"sha: {sha}, status: {diff}, branch: {branch}"
+    return message
+
+
