@@ -1,0 +1,52 @@
+# Name of the run. For output directory and wandb.
+name: nsd_clip_class_eval
+
+# Prediction task
+#   - classification
+#   - regression
+task: classification
+
+# Datasets
+datasets:
+  nsd-train:
+    root: datasets/flat-clips/nsd-train-task-clips-16t
+    split_range: [0.0, 0.9]
+    shuffle: true
+
+  nsd-train-subset:
+    root: datasets/flat-clips/nsd-train-task-clips-16t
+    split_range: [0.0, 0.1]
+    shuffle: false
+
+  nsd-train-holdout:
+    root: datasets/flat-clips/nsd-train-task-clips-16t
+    split_range: [0.9, 1.0]
+    shuffle: false
+
+  nsd-val:
+    root: datasets/flat-clips/nsd-val-task-clips-16t
+    shuffle: false
+
+  nsd-test:
+    root: datasets/flat-clips/nsd-test-task-clips-16t
+    shuffle: false
+
+  nsd-test-ood:
+    root: datasets/flat-clips/nsd-test-ood-task-clips-16t
+    shuffle: false
+
+# Dataset names for special subsets.
+train_dataset: nsd-train
+val_dataset: nsd-val
+test_dataset: nsd-test
+eval_datasets:
+  - nsd-train-subset
+  - nsd-train-holdout
+  - nsd-test-ood
+
+# Target ID map, if not already in the samples.
+target_id_map: null
+target_key: null
+
+# Number of target classes for classification, or target dimension for regression.
+num_classes: 41
