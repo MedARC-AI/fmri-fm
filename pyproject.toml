@@ -5,43 +5,38 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fmri-fm"
 dynamic = ["version"]
-description = "MedARC fMRI foundation model"
+description = "Sophont fMRI foundation model"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "datasets",
     "einops",
-    "huggingface_hub",
+    "fvcore",
+    "huggingface-hub",
+    "iopath",
     "ipython",
-    "jaxtyping",
     "jupyter",
+    "jupyterlab",
     "matplotlib",
-    "nibabel",
-    "nsdcode",
-    "numpy",
+    "numpy<2",
     "omegaconf",
+    "pandas",
+    "pillow",
     "pre-commit",
-    "pydantic<2.7",  # silence pydantic v2 warning
     "pytest",
-    "pycortex",
     "scikit-learn",
     "scipy",
+    "simplejson",
     "timm",
-    "torch",
+    "torch==2.4.1",
+    "torchdata",
+    "torchmetrics",
     "torchvision",
     "tqdm",
+    "transformers",
     "wandb",
     "webdataset",
 ]
 
 [tool.setuptools_scm]
 version_file = "src/_version.py"
-
-[tool.uv.sources]
-nsdcode = { git = "https://github.com/cvnlab/nsdcode.git", rev = "bfd36a503cc90a3eb3ebfd69b269403f7e186924" }
-
-[tool.ruff]
-line-length = 100
-
-[tool.ruff.lint]
-ignore = ["F722"]

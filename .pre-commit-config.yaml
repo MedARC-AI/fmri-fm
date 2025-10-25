@@ -1,4 +1,4 @@
-exclude: 'build|third-party|.github|baselines'
+exclude: 'build|third-party|.github'
 
 default_language_version:
     python: python3
@@ -12,6 +12,7 @@ repos:
     -   id: check-merge-conflict
     -   id: end-of-file-fixer
 
+# ruff disabled for now
 - repo: https://github.com/astral-sh/ruff-pre-commit
   # Ruff version.
   rev: v0.12.5

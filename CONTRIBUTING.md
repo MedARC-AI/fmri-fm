@@ -31,20 +31,12 @@ The basic workflow is:
 4. Make your code changes. Follow the [code guidelines](#code-guidelines).
 5. When you're satisfied or need feedback, mark your PR ready to review.
 
-### Base branches
-
-Your PR should target a different [base branch](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/changing-the-base-branch-of-a-pull-request) depending on what it's adding
-
-- If your PR adds a mature validated feature, the base should be `main`. These PRs will be carefully reviewed.
-- If your PR adds an experimental feature, the base should be `dev/<branch>`. These PRs will be lightly reviewed.
-- If your PR adds one-off personal code, the base should be `<user>/<branch>`. These PRs will be merged without review.
-
 ## Code guidelines
 
 **Flat organization.** To make it easy to hack around and try ideas, we prefer a [wide and flat](https://www.evandemond.com/programming/wide-and-flat) source layout, with minimal dependencies between different parts of the codebase. This results in duplicated code, but we prefer this over trying to maintain a tightly interconnected abstract modular architecture.
 See Dan Abramov's [talk on the "WET" codebase](https://overreacted.io/the-wet-codebase/), or the huggingface ["repeat yourself" design philosophy](https://huggingface.co/blog/transformers-design-philosophy) for more motivation.
 
-**Small changes.** Each pull request should [address just one thing](https://github.com/google/eng-practices/blob/master/review/developer/small-cls.md), and introduce the [minimal changes](https://gavinr.com/clean-pull-request-diffs/) to address it *well*. Every line in the PR diff should relate to the goal of the PR, while also maintaining the quality of the codebase.
+**Meaningful commits.** Keep your commits [small but meaningful](https://www.donnywals.com/why-you-should-keep-your-git-commits-small-and-meaningful/), and write meaningful commit messages. To maintain a complete historical record, we don't [squash commits](https://dev.to/wesen/squash-commits-considered-harmful-ob1). To keep an intelligible history, we rely on having meaningful commits that are neither too big or too small.
 
 **Consistency.** If you're new to the project, aiming for [consistency](https://www.seangoedecke.com/large-established-codebases/) is the best overall guide. Try to keep your code consistent (in terms of structure, style) with the code around it, and just be conscientious and attentive to detail to help us keep this project under control. Otherwise it will spiral into chaos.
 
