@@ -260,6 +260,7 @@ def create_data_loaders(args: DictConfig):
             num_workers=args.num_workers,
             pin_memory=True,
             drop_last=True,
+            persistent_workers=True
         )
 
         # setting the epoch length is needed for infinite wds loaders

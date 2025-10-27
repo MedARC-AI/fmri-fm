@@ -43,12 +43,19 @@ def make_flat_wds_dataset(
     # resampling creates an infinite stream of shards sampled with replacement,
     # guaranteeing that no process runs out of data early in distributed training.
     # see webdataset FAQ: https://github.com/webdataset/webdataset/blob/main/FAQ.md
+    expanded_urls = expand_urls(url)
     if stream_hf:
         hf_token = get_token()
         assert hf_token, "No HF token found; run hf auth login"
-        url = f"pipe:curl -s -L {url} -H 'Authorization:Bearer {hf_token}' --retry 10 --retry-delay 1 --retry-max-time 60 --retry-all-errors"
+        pipe_cmd = (
+            "pipe:curl -sS -L --fail -C - "
+            "--retry 20 --retry-delay 2 --retry-max-time 300 --retry-all-errors "
+            "--connect-timeout 10 "
+            f"-H 'Authorization: Bearer {hf_token}' "
+        )
+        expanded_urls = [f'{pipe_cmd}"{u}"' for u in expanded_urls]
     dataset = wds.WebDataset(
-        expand_urls(url),
+        expanded_urls,
         resampled=shuffle,
         shardshuffle=False,
         nodesplitter=wds.split_by_node,
