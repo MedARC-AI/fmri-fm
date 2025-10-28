@@ -1,84 +1,89 @@
-# src/flat_mae/simclr_models.py
-
 import torch
 import torch.nn as nn
+from src.flat_mae.models_mae import MaskedViT # We reuse the encoder from the MAE implementation
+from simclr.loss import (
+    SimCLRProjectionHead,
+    SimSiamProjectionHead,
+    SimSiamPredictionHead,
+    nt_xent_loss,
+    simsiam_loss,
+)
 
-class ProjectionHead(nn.Module):
+class ContrastiveModel(nn.Module):
     """
-    The Projection Head (g(·)) for the SimCLR framework.
-    As described in the paper, this is a small MLP that maps the representation (h)
-    to the latent space where the contrastive loss is applied.
+    A unified model for contrastive learning, supporting both SimCLR and SimSiam.
     """
-    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
+    def __init__(self, backbone: MaskedViT, mode: str = "simclr", embed_dim: int = 384):
         """
         Args:
-            input_dim (int): The feature dimension of the output from the base encoder (h).
-            hidden_dim (int): The dimension of the hidden layer in the MLP.
-            output_dim (int): The final output dimension of the projection (z).
+            backbone (MaskedViT): The pre-trained or randomly initialized backbone encoder.
+            mode (str): The contrastive learning mode. Can be "simclr" or "simsiam".
+            embed_dim (int): The output dimension of the backbone encoder.
         """
         super().__init__()
+        if mode not in ["simclr", "simsiam"]:
+            raise ValueError(f"Invalid contrastive mode: {mode}")
         
-        # The MLP consists of a linear layer, a non-linearity (ReLU), and another linear layer.
-        self.mlp = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(inplace=True),
-            nn.Linear(hidden_dim, output_dim)
-        )
-
-    def forward(self, x):
-        """
-        Passes the representation vector through the MLP.
-        Args:
-            x (torch.Tensor): The representation vector (h) from the base encoder.
-        Returns:
-            torch.Tensor: The projected vector (z).
-        """
-        return self.mlp(x)
-
-
-class SimCLRModel(nn.Module):
-    """
-    The complete SimCLR model, combining the base encoder and the projection head.
-    """
-    def __init__(self, backbone: nn.Module, projection_head: nn.Module):
-        """
-        Args:
-            backbone (nn.Module): The base encoder network (f(·)), e.g., a ViT.
-                                  It is expected to have a `forward_embedding` method.
-            projection_head (nn.Module): The MLP projection head (g(·)).
-        """
-        super().__init__()
+        self.mode = mode
         self.backbone = backbone
-        self.projection_head = projection_head
 
-    def forward(self, view_1: torch.Tensor, view_2: torch.Tensor):
+        if self.mode == "simclr":
+            # For SimCLR, we only need a projection head.
+            self.projection_head = SimCLRProjectionHead(in_dim=embed_dim)
+        
+        elif self.mode == "simsiam":
+            # For SimSiam, we need both a projection head and a prediction head.
+            self.projection_head = SimSiamProjectionHead(in_dim=embed_dim)
+            self.prediction_head = SimSiamPredictionHead()
+
+    def get_representation(self, x: torch.Tensor, mask_ratio: float):
         """
-        Performs the forward pass for both augmented views as shown in Figure 2 of the paper.
+        A helper function to pass an input through the backbone and get the CLS token.
+        """
+        # The MAE backbone returns (cls_token, reg_tokens, patch_tokens, mask, ids_keep)
+        # We only need the cls_token for contrastive learning.
+        cls_embeds, _, _, _, _ = self.backbone(x, mask_ratio=mask_ratio)
+        # The cls_embeds has a shape of [Batch, 1, Dim], so we squeeze it.
+        return cls_embeds.squeeze(1)
+
+    def forward(self, view_1: torch.Tensor, view_2: torch.Tensor, mask_ratio: float):
+        """
+        The main forward pass. It takes two augmented views and computes the final loss.
 
         Args:
             view_1 (torch.Tensor): The first batch of augmented images.
             view_2 (torch.Tensor): The second batch of augmented images.
+            mask_ratio (float): The ratio of patches to mask in the encoder.
 
         Returns:
-            tuple[torch.Tensor, torch.Tensor]: A tuple containing the two projected vectors (z1, z2).
+            torch.Tensor: The final calculated loss for the batch.
         """
         
-        # --- Process View 1 ---
-        # 1. Get the representation vector (h1) from the backbone encoder.
-        #    We use `forward_embedding` to get the feature representation. The output is a tuple,
-        #    and we'll typically use the CLS token as the representation.
-        _, _, h1_patches = self.backbone.forward_embedding(view_1)
-        
-        # For a ViT, a common representation is the average of all patch tokens.
-        h1 = h1_patches.mean(dim=1)
-        
-        # 2. Get the projection (z1) by passing h1 through the projection head.
-        z1 = self.projection_head(h1)
+        # Get the representations (h1, h2) from the backbone for each view
+        h1 = self.get_representation(view_1, mask_ratio)
+        h2 = self.get_representation(view_2, mask_ratio)
 
-        # --- Process View 2 ---
-        # Repeat the exact same process for the second view.
-        _, _, h2_patches = self.backbone.forward_embedding(view_2)
-        h2 = h2_patches.mean(dim=1)
-        z2 = self.projection_head(h2)
+        if self.mode == "simclr":
+            # --- SimCLR Forward Pass ---
+            # 1. Get the projections (z1, z2)
+            z1 = self.projection_head(h1)
+            z2 = self.projection_head(h2)
+            
+            # 2. Calculate the loss
+            loss = nt_xent_loss(z1, z2)
+            return loss
 
-        return z1, z2
+        elif self.mode == "simsiam":
+            # --- SimSiam Forward Pass ---
+            # 1. Get the projections (z1, z2)
+            z1 = self.projection_head(h1)
+            z2 = self.projection_head(h2)
+
+            # 2. Get the predictions (p1, p2)
+            p1 = self.prediction_head(z1)
+            p2 = self.prediction_head(z2)
+
+            # 3. Calculate the loss
+            loss = simsiam_loss(p1, z2, p2, z1)
+            return loss
+
