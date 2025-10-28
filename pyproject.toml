@@ -21,7 +21,7 @@ dependencies = [
     "numpy",
     "omegaconf",
     "pre-commit",
-    "pydantic<2.7",  # silence pydantic v2 warning
+    "pydantic",  # silence pydantic v2 warning
     "pytest",
     "pycortex",
     "scikit-learn",
