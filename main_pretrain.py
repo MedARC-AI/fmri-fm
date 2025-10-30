@@ -1,110 +1,197 @@
-# src/simclr/main_pretrain.py
-
-import torch
-import torch.optim as optim
-from torch.utils.data import DataLoader
+import argparse
+import datetime
+import json
+import os
+import random
+import time
 from pathlib import Path
-from tqdm import tqdm
+import math
 
-# --- Import components using the new modular structure ---
-import src.data.flat_data as flat_data
-import src.simclr.data as simclr_data
-import src.flat_mae.models_mae as models_mae
-import src.simclr.models as simclr_models
-import src.simclr.loss as simclr_loss
+import numpy as np
+import torch
+import torch.backends.cudnn as cudnn
+import wandb
+from omegaconf import DictConfig, OmegaConf
+from torch.utils.data.distributed import DistributedSampler
 
-def main():
-    """
-    Main function to run a simplified SimCLR pre-training loop.
-    """
-    print("--- Starting SimCLR Pre-training Verification Script ---")
+import flat_mae.utils as ut
+import flat_mae.models_mae as models_mae
 
-    # --- 1. Configuration ---
-    # File Paths
-    # IMPORTANT: Paths are now relative to the project root, not the script location.
-    data_folder_path = Path("nsd-train-task-clips-16t") # Assuming this folder is in the project root
-    
-    # Model Hyperparameters
-    backbone_embed_dim = 384  # For ViT-Small
-    projection_hidden_dim = 512
-    projection_output_dim = 128 # As used in the SimCLR paper
-    
-    # Training Hyperparameters
-    batch_size = 4
-    learning_rate = 1e-4
-    temperature = 0.5
-    num_epochs = 3 # Run for a few epochs to see it work
+import data.flat_data as flat_data
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+from simclr.data import SimCLRTransform, simclr_collate
+from simclr.models import ContrastiveModel
+from simclr.loss import nt_xent_loss, simsiam_loss
 
-    # --- 2. Data Pipeline Setup ---
-    print("\n--- Setting up Data Pipeline ---")
+import flat_mae.models_mae as models_mae
+
+PROJECT = "fMRI-foundation-model"
+
+
+BACKBONE_MODELS_DICT = models_mae.__dict__
+
+def main(args: DictConfig):
+    ut.init_distributed_mode(args)
+    global_rank = ut.get_rank()
+    is_master = global_rank == 0
+    world_size = ut.get_world_size()
+    device = torch.device(args.device)
+    ut.random_seed(args.seed, rank=global_rank)
+
+    if args.name and not args.output_dir.endswith(args.name):
+        args.output_dir = f"{args.output_dir}/{args.name}"
+    output_dir = Path(args.output_dir)
+
+    if is_master:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        OmegaConf.save(args, output_dir / "config.yaml")
+
+    ut.setup_for_distributed(log_path=output_dir / "log.txt")
+    print(f"pretraining with {args.model.contrastive_mode}")
+    print("config:", OmegaConf.to_yaml(args), sep="\n")
+
+    train_loader, eval_loaders = create_data_loaders(args)
+
+    print(f"Creating backbone: {args.model.backbone_name}")
+    backbone = BACKBONE_MODELS_DICT[args.model.backbone_name](
+        img_size=args.data.img_size,
+        in_chans=args.data.in_chans,
+        **args.model.get("backbone_kwargs", {}),
+    )
+    model = ContrastiveModel(
+        backbone=backbone,
+        mode=args.model.contrastive_mode,
+        embed_dim=args.model.backbone_kwargs.embed_dim,
+        model_kwargs=args.model.get("head_kwargs"),
+    ).to(device)
+
+    model_without_ddp = model
+    if args.distributed:
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+        model_without_ddp = model.module
+
+    print("model:", model, sep="\n")
+
+    total_batch_size = args.optim.batch_size * args.optim.accum_iter * world_size
+    if not args.optim.get("lr"): args.optim.lr = args.optim.base_lr * total_batch_size / 256
+
+    param_groups = ut.get_param_groups(model)
+    ut.update_lr(param_groups, args.optim.lr)
+    ut.update_wd(param_groups, args.optim.weight_decay)
+    optimizer = torch.optim.AdamW(param_groups, betas=tuple(args.optim.betas))
+
+    epoch_num_batches = len(train_loader)
+    steps_per_epoch = epoch_num_batches // args.optim.accum_iter
+    total_steps = args.optim.epochs * steps_per_epoch
+    warmup_steps = args.optim.warmup_epochs * steps_per_epoch
+    lr_schedule = ut.WarmupThenCosine(
+        base_value=args.optim.lr, final_value=args.optim.min_lr,
+        total_iters=total_steps, warmup_iters=warmup_steps
+    )
+
+    loss_scaler = ut.GradScaler() if args.amp and args.amp_dtype != 'bfloat16' else None
+
+    ut.load_model(args, model_without_ddp, optimizer, loss_scaler)
+
+    print(f"start training for {args.optim.epochs} epochs")
+    for epoch in range(args.start_epoch, args.optim.epochs):
+        if args.distributed: train_loader.sampler.set_epoch(epoch)
+
+        train_stats = train_one_epoch(args, model, train_loader, optimizer, loss_scaler, lr_schedule, epoch, device)
+
+
+        if args.output_dir:
+            ut.save_model(args, epoch, model_without_ddp, optimizer, loss_scaler)
+
+
+def create_data_loaders(args: DictConfig):
     base_transform = flat_data.make_flat_transform(
-        img_size=(224, 560),
-        normalize='global',
-        random_crop=True,
-        crop_kwargs={'scale': (0.8, 1.0), 'ratio': (2.4, 2.6)}
+        img_size=args.data.img_size,
+        clip_vmax=args.data.get("clip_vmax"),
+        normalize=args.data.get("normalize"),
+        random_crop=args.data.get("random_crop", False),
+        crop_kwargs=args.data.get("crop_kwargs"),
     )
-    transform = simclr_data.SimCLRTransform(base_transform)
-    dataset = flat_data.FlatClipsDataset(root=data_folder_path, transform=transform)
-    data_loader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        collate_fn=simclr_data.simclr_collate,
-        shuffle=True,
-        num_workers=0
-    )
-    print("Data pipeline setup complete.")
 
-    # --- 3. Model and Optimizer Setup ---
-    print("\n--- Setting up Model and Optimizer ---")
-    # Base Encoder (Backbone)
-    backbone = models_mae.mae_vit_small(img_size=(224, 560), in_chans=1)
+    transform = SimCLRTransform(base_transform)
+
+    data_loaders = {}
+    dataset_names = [args.train_dataset] + args.eval_datasets
+    for name in dataset_names:
+        config = args.datasets[name]
+        dataset = flat_data.FlatClipsDataset(root=config.root, transform=transform)
+        sampler = DistributedSampler(dataset, shuffle=config.shuffle) if args.distributed else None
+
+        loader = flat_data.DataLoader(
+            dataset, batch_size=args.optim.batch_size,
+            collate_fn=simclr_collate, sampler=sampler,
+            shuffle=sampler is None and config.shuffle,
+            num_workers=args.num_workers, pin_memory=True, drop_last=True
+        )
+        data_loaders[name] = loader
     
-    # Projection Head
-    projection_head = simclr_models.ProjectionHead(
-        input_dim=backbone_embed_dim,
-        hidden_dim=projection_hidden_dim,
-        output_dim=projection_output_dim
-    )
-    
-    # Full SimCLR Model
-    model = simclr_models.SimCLRModel(backbone, projection_head).to(device)
-    
-    # Optimizer
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    
-    # Loss Function
-    criterion = simclr_loss.NTXentLoss(temperature=temperature).to(device)
-    
-    print("Model, optimizer, and loss function setup complete.")
+    train_loader = data_loaders.pop(args.train_dataset)
+    return train_loader, data_loaders
 
-    # --- 4. The Training Loop ---
-    print(f"\n--- Starting Training for {num_epochs} Epochs ---")
-    
-    for epoch in range(num_epochs):
-        loop = tqdm(data_loader, desc=f"Epoch [{epoch+1}/{num_epochs}]", leave=False)
-        total_loss = 0.0
 
-        for batch_view_1, batch_view_2 in loop:
-            view_1_images = batch_view_1['image'].to(device)
-            view_2_images = batch_view_2['image'].to(device)
+def train_one_epoch(args, model, data_loader, optimizer, loss_scaler, lr_schedule, epoch, device):
+    # --- This is the training engine, adapted for SimCLR/SimSiam ---
+    model.train()
+    metric_logger = ut.MetricLogger(delimiter="  ")
+    header = f'Train: [{epoch}]'
 
-            optimizer.zero_grad()
-            z1, z2 = model(view_1_images, view_2_images)
-            loss = criterion(z1, z2)
-            loss.backward()
-            optimizer.step()
+    epoch_num_batches = len(data_loader)
+    steps_per_epoch = epoch_num_batches // args.optim.accum_iter
 
-            total_loss += loss.item()
-            loop.set_postfix(loss=loss.item())
+    optimizer.zero_grad()
 
-        avg_loss = total_loss / len(data_loader)
-        print(f"Epoch [{epoch+1}/{num_epochs}] completed. Average Loss: {avg_loss:.4f}")
+    for batch_idx, (batch_view_1, batch_view_2) in enumerate(metric_logger.log_every(data_loader, 100, header)):
 
-    print("\n--- Training Verification Complete ---")
-    print("Refactoring successful. The script ran correctly from its new location.")
+        global_step = epoch * steps_per_epoch + (batch_idx + 1) // args.optim.accum_iter
+        lr = lr_schedule[global_step]
+        need_update = (batch_idx + 1) % args.optim.accum_iter == 0
+        if need_update: ut.update_lr(optimizer.param_groups, lr)
+
+        view_1 = batch_view_1['image'].to(device, non_blocking=True)
+        view_2 = batch_view_2['image'].to(device, non_blocking=True)
+
+        with torch.autocast(device_type=device.type, dtype=getattr(torch, args.amp_dtype), enabled=args.amp):
+
+            outputs = model(view_1, view_2, mask_ratio=args.model.mask_ratio)
+
+            if args.model.contrastive_mode == "simclr":
+                z1, z2 = outputs
+                loss = nt_xent_loss(z1, z2, temperature=args.model.get("temperature", 0.5), distributed=args.distributed)
+            elif args.model.contrastive_mode == "simsiam":
+                p1, z2, p2, z1 = outputs
+                loss = simsiam_loss(p1, z2, p2, z1)
+            else:
+                raise ValueError(f"Unknown contrastive mode: {args.model.contrastive_mode}")
+
+        loss_value = loss.item()
+        if not math.isfinite(loss_value): raise RuntimeError(f"Loss is {loss_value}, stopping training")
+
+        ut.backward_step(loss / args.optim.accum_iter, optimizer, scaler=loss_scaler, 
+                         need_update=need_update, max_norm=args.optim.get("clip_grad"))
+
+        metric_logger.update(loss=loss_value)
+
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+@torch.no_grad()
+def evaluate(model, data_loader, name, device, args):
+    model.eval()
+    print(f"--- Running evaluation on {name} ---")
+
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cfg-path", type=str, required=True)
+    parser.add_argument("--overrides", type=str, default=None, nargs="+")
+    cli_args = parser.parse_args()
+
+    cfg = OmegaConf.load(cli_args.cfg_path)
+    if cli_args.overrides:
+        cfg = OmegaConf.merge(cfg, OmegaConf.from_dotlist(cli_args.overrides))
+
+    main(cfg)
