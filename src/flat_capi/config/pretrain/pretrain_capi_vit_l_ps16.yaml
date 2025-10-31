@@ -1,8 +1,9 @@
 # Name of the run. For output directory and wandb.
-name: pretrain_capi_hcp_defaults_random_crop
+# CUDA_VISIBLE_DEVICES=1 python -m flat_capi.main_pretrain --cfg-path src/flat_capi/config/pretrain/capi_vit_l_ps16.yaml
+name: pretrain_capi_vit_l_ps16_mae_defaults
 
 # Description of the run. Goes in wandb notes.
-notes: capi_model_defaults, random_crop, weight_decay_0.1, layernorm_wd_0.0, bs=128, lr=1.0e-3, ncls=16384, time_as_channels=true, ps=14, mask_ratio=0.75, pred_subsampling=0.05
+notes: vit-l/16 (embed_dim=1024, heads=16, enc=24, dec=4), mask_ratio=0.9
 
 # Root output directory
 output_dir: checkpoints
@@ -16,7 +17,20 @@ start_epoch: 0
 resume: null
 
 # Model
-model: vit_l14_capi
+model: vit_l16_capi
+transformers_kwargs:
+  embed_dim: 1024
+  drop_path_rate: 0.0  # CAPI default: 0.2; set to 0.0 to match MAE base
+  block_kwargs:
+    attn_kwargs:
+      num_heads: 16
+encoder_kwargs:
+  depth: 24
+decoder_kwargs:
+  depth: 4  # CAPI default: 12; set to 4 to match MAE base
+norm_layer_type: LayerNorm  # CAPI default: RMSNorm; set to LayerNorm to match MAE base
+final_norm_kwargs:
+  elementwise_affine: true  # CAPI default: false; set true to match MAE base
 
 # Standard image size of fmri flat datasets.
 img_size: [224, 560]
@@ -38,7 +52,8 @@ capi:
     lr_schedule:
       base_value: 5.0e-4
       final_value: 0.0
-      warmup_iters: 50000
+      warmup_epochs: 25
+      freeze_epochs: 0
       truncate_cos: 1.0
 
 # Temporal/video settings
@@ -47,22 +62,22 @@ time_as_channels: true
 select_frame_index: 0
 
 # Masking/generation params for indices building
-mask_ratio: 0.75
+mask_ratio: 0.9
 prediction_subsampling: 0.05
-patch_size: 14
+patch_size: 16
 
 # Optimization
-epochs: 500
-batch_size: 128
+epochs: 250
+batch_size: 256
 accum_iter: 1
-base_lr: 1.0e-4 # scaled acc to effective bs (ref bs=256); fallback val; overriden for CAPI expts
+base_lr: 5.0e-4 # scaled acc to effective bs (ref bs=256)
 min_lr: 0.0
-warmup_epochs: 50 # at bs=96, this is 52050 steps; bs=128 is 39050 steps
+warmup_epochs: 25
 lr_schedule:
-  base_value: 0.001 # overrides base_lr
+  base_value: 5.0e-4 # overrides base_lr
   final_value: 0.0
-  warmup_iters: 50000
-  freeze_iters: 0
+  warmup_epochs: 25
+  freeze_epochs: 0
   truncate_cos: 1.0
 weight_decay: 0.1
 beta: [0.9, 0.95]
@@ -79,9 +94,9 @@ momentum_schedule:
   start_warmup_value: 1.0
   base_value: 0.999
   final_value: 1.0
-  freeze_iters: 0
+  freeze_epochs: 0
   truncate_cos: 1.0
-  warmup_iters: 50000
+  warmup_epochs: 25
 
 # Datasets (maintain archived paths)
 datasets:
@@ -131,7 +146,7 @@ log_metrics_cadence: 1
 
 wandb: true
 wandb_entity: null
-wandb_project: fMRI-foundation-model
+wandb_project: fMRI-foundation-model-pretrain
 debug: false
 device: cuda
 

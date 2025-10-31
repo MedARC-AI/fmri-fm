@@ -1,0 +1,48 @@
+# Name of the run. For output directory and wandb.
+name: hcp_task_eval_capi
+
+# Prediction task
+task: classification
+
+# Datasets
+datasets:
+  hcp-train:
+    # root: /teamspace/r2_connections/medarc/fmri-fm/datasets/flat-clips/hcp-train-task-clips-16t
+    root: /teamspace/gcs_folders/share/fmri-fm/datasets/flat-clips/hcp-train-task-clips-16t
+    split_range: [0.0, 0.9]
+    shuffle: true
+
+  hcp-train-subset:
+    # root: /teamspace/r2_connections/medarc/fmri-fm/datasets/flat-clips/hcp-train-task-clips-16t
+    root: /teamspace/gcs_folders/share/fmri-fm/datasets/flat-clips/hcp-train-task-clips-16t
+    split_range: [0.0, 0.1]
+    shuffle: false
+
+  hcp-train-holdout:
+    # root: /teamspace/r2_connections/medarc/fmri-fm/datasets/flat-clips/hcp-train-task-clips-16t
+    root: /teamspace/gcs_folders/share/fmri-fm/datasets/flat-clips/hcp-train-task-clips-16t
+    split_range: [0.9, 1.0]
+    shuffle: false
+
+  hcp-val:
+    # root: /teamspace/r2_connections/medarc/fmri-fm/datasets/flat-clips/hcp-val-task-clips-16t
+    root: /teamspace/gcs_folders/share/fmri-fm/datasets/flat-clips/hcp-val-task-clips-16t
+    shuffle: false
+
+  hcp-test:
+    # root: /teamspace/r2_connections/medarc/fmri-fm/datasets/flat-clips/hcp-test-task-clips-16t
+    root: /teamspace/gcs_folders/share/fmri-fm/datasets/flat-clips/hcp-test-task-clips-16t
+    shuffle: false
+
+# Dataset names for special subsets.
+train_dataset: hcp-train
+val_dataset: hcp-val
+test_dataset: hcp-test
+eval_datasets:
+  - hcp-train-subset
+  - hcp-train-holdout
+
+# Number of target classes for classification
+num_classes: 21
+
+
