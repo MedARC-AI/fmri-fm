@@ -1,0 +1,48 @@
+# Name of the run. For output directory and wandb.
+name: nsd_clip_class_eval_capi
+
+# Prediction task
+task: classification
+
+# Datasets
+datasets:
+  nsd-train:
+    root: /teamspace/gcs_folders/share/fmri-fm/datasets/flat-clips/nsd-train-task-clips-16t
+    split_range: [0.0, 0.9]
+    shuffle: true
+
+  nsd-train-subset:
+    root: /teamspace/gcs_folders/share/fmri-fm/datasets/flat-clips/nsd-train-task-clips-16t
+    split_range: [0.0, 0.1]
+    shuffle: false
+
+  nsd-train-holdout:
+    root: /teamspace/gcs_folders/share/fmri-fm/datasets/flat-clips/nsd-train-task-clips-16t
+    split_range: [0.9, 1.0]
+    shuffle: false
+
+  nsd-val:
+    root: /teamspace/gcs_folders/share/fmri-fm/datasets/flat-clips/nsd-val-task-clips-16t
+    shuffle: false
+
+  nsd-test:
+    root: /teamspace/gcs_folders/share/fmri-fm/datasets/flat-clips/nsd-test-task-clips-16t
+    shuffle: false
+
+  nsd-test-ood:
+    root: /teamspace/gcs_folders/share/fmri-fm/datasets/flat-clips/nsd-test-ood-task-clips-16t
+    shuffle: false
+
+# Dataset names for special subsets.
+train_dataset: nsd-train
+val_dataset: nsd-val
+test_dataset: nsd-test
+eval_datasets:
+  - nsd-train-subset
+  - nsd-train-holdout
+  - nsd-test-ood
+
+# Number of target classes for classification
+num_classes: 41
+
+

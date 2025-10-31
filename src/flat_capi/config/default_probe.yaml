@@ -1,0 +1,124 @@
+# Name of the run. For output directory and wandb.
+name: probe_eval_capi
+
+# Prediction task
+#   - classification
+#   - regression
+task: classification
+
+# Regression loss function
+#   - mse
+#   - cosine
+loss_function: mse
+
+# Description of the run. Goes in wandb notes.
+notes: null
+
+output_dir: checkpoints
+
+# Standard image size of fmri flat datasets.
+# Used when creating the model for setting up the patch embedding and such.
+img_size: [224, 560]
+in_chans: 1
+patch_size: 14
+
+# Temporal config.
+num_frames: 16
+time_as_channels: true
+select_frame_index: 0
+
+# Model
+# Default load model config from checkpoint
+model: vit_l14_capi
+model_kwargs: {}
+
+# Classifier settings
+# Classifier input pooled embeddings.
+representations:
+- cls
+- avg_patch
+- patch
+
+# Intermediate embed dim for attentive probe
+attn_pool_embed_dim: null
+
+# Grid of learning rate scale factors and weight decays for linear classifiers.
+lr_scale_grid: [0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]
+weight_decay_grid: [3e-4, 0.001, 0.01, 0.03, 0.1, 0.3, 1.0]
+
+# Baseline model settings (not used here but kept for parity)
+parcellation_path: datasets/Schaefer2018_400Parcels_7Networks_order.flat.npy
+
+# Datasets
+datasets: {}
+
+train_dataset: null
+val_dataset: null
+test_dataset: null
+eval_datasets: []
+
+# Target ID map, if not already in the samples.
+target_id_map: null
+target_key: null
+
+# Number of target classes for classification, or target dimension for regression.
+num_classes: 2
+
+# Data transform
+clip_vmax: 3.0
+normalize: frame
+
+# Data loader
+num_workers: 8
+
+# Optimization
+epochs: 20
+# batch size per gpu, so total_batch_size = batch_size * num_gpus_per_node * num_nodes
+batch_size: 128
+accum_iter: 1
+
+# absolute_lr = base_lr * total_batch_size / 256
+base_lr: 1e-3
+# lower lr bound for cyclic schedulers that hit 0
+min_lr: 0.0
+warmup_epochs: 2
+weight_decay: 0.05
+betas: [0.9, 0.95]
+clip_grad: 1.0
+
+amp: true
+amp_dtype: float16
+
+# Pretrain model checkpoint
+pretrain_ckpt: null
+
+# Checkpoint to use for init
+ckpt: null
+# resume training, or restart
+resume: true
+# Restarting a failed run (with the same output directory) will automatically resume
+auto_resume: true
+# The start epoch is taken from the checkpoint when resuming, but in case you need to
+# manually override.
+start_epoch: 0
+
+# Whether to do full-finetuning, or frozen probe evaluation.
+finetune: false
+
+# The last checkpoint is always saved, this controls how many extra are kept
+# By default only keep the last checkpoint
+max_checkpoints: 0
+checkpoint_period: null
+
+device: cuda
+# presend data to cuda asynchronously
+presend_cuda: false
+
+seed: 7338
+debug: false
+
+wandb: true
+wandb_entity: null
+wandb_project: fMRI-foundation-model
+
+
