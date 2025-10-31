@@ -1,0 +1,119 @@
+# Name of the run. For output directory base name and wandb.
+name: pretrain_simclr_vit_base
+
+# Description of the run. Goes in wandb notes.
+notes: "SimCLR pre-training with a ViT-Base backbone on the HCP dataset."
+
+# Root output directory
+output_dir: ./checkpoints
+
+# How often to print logs to the console during training/evaluation.
+print_freq: 100
+
+# --- Data Config ---
+# All parameters related to data shape and transformations.
+data:
+  # The 2D spatial size of the input images [height, width].
+  # The model gets the time dimension from `num_frames`.
+  img_size: [224, 560] 
+  in_chans: 1
+  patch_size: 16
+  num_frames: 16
+  t_patch_size: 16
+  clip_vmax: 3.0
+  normalize: frame
+  random_crop: false
+  crop_kwargs:
+    scale: [0.9, 1.0]
+    ratio: [2.5, 2.5]
+    interpolation: 3
+
+# --- Model Config ---
+model:
+  contrastive_mode: simclr
+  backbone_name: mae_vit_base
+  mask_ratio: 0.9
+  temperature: 0.1
+  
+  # Arguments passed to the backbone model constructor.
+  # Architectural details like embed_dim are set by the `backbone_name` preset.
+  backbone_kwargs:
+    pos_embed: sep
+    class_token: true
+    drop_path_rate: 0.0
+    
+  # Arguments passed to the projection/prediction head constructors.
+  head_kwargs:
+    hidden_dim: 2048
+    out_dim: 128
+
+# --- Datasets ---
+# Replace the placeholder paths with the actual locations of your datasets.
+datasets:
+  hcp-train:
+    type: flat-wds
+    url: "path/to/your/hcp-flat/hcp-flat_{0000..1799}.tar"
+    clipping: random
+    clipping_kwargs: {oversample: 4.0}
+    shuffle: true
+    buffer_size: 1000
+    samples_per_epoch: 200000
+
+  hcp-train-subset:
+    type: flat-clips
+    root: "path/to/your/flat-clips/hcp-train-clips-16t"
+    shuffle: false
+
+  hcp-val:
+    type: flat-clips
+    root: "path/to/your/flat-clips/hcp-val-clips-16t"
+    shuffle: false
+
+  nsd-val:
+    type: flat-clips
+    root: "path/to/your/flat-clips/nsd-subj01-clips-16t"
+    shuffle: false
+
+# Which datasets to use for training and evaluation.
+train_dataset: hcp-train
+eval_datasets: 
+  - hcp-val
+  - nsd-val
+
+# --- Data Loader ---
+num_workers: 8
+
+# --- Optimization ---
+optim:
+  epochs: 100
+  batch_size: 32
+  accum_iter: 1
+  base_lr: 1e-3
+  min_lr: 0.0
+  warmup_epochs: 5
+  start_warmup_lr: 1e-6
+  weight_decay: 0.05
+  betas: [0.9, 0.95]
+  clip_grad: 1.0
+
+# --- Training Settings ---
+amp: true
+amp_dtype: float16
+
+# --- Checkpointing ---
+ckpt: null
+resume: true
+auto_resume: true
+start_epoch: 0
+max_checkpoints: 1
+checkpoint_period: 1
+
+# --- Misc ---
+device: cuda
+seed: 7338
+debug: false
+
+# --- Logging ---
+wandb: true
+wandb_entity: null
+wandb_project: fMRI-foundation-model
