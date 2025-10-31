@@ -1,94 +1,119 @@
-# In src/simclr/config/hcp_pretrain.yaml
+# Name of the run. For output directory base name and wandb.
+name: pretrain_simclr_vit_base
 
-# A professional config for pre-training SimCLR on the full HCP dataset.
-# Adapted from the flat_mae/config/default_pretrain.yaml.
+# Description of the run. Goes in wandb notes.
+notes: "SimCLR pre-training with a ViT-Base backbone on the HCP dataset."
 
-name: "simclr_pretrain_hcp_100_shards"
-notes: "Pre-training run of SimCLR with a ViT-Small backbone on 100 local shards of the HCP-YA dataset."
-output_dir: "checkpoints/${name}"
+# Root output directory
+output_dir: ./checkpoints
 
-# --- Data Configuration ---
-# Inherited from the MAE config
+# How often to print logs to the console during training/evaluation.
+print_freq: 100
+
+# --- Data Config ---
+# All parameters related to data shape and transformations.
 data:
-  img_size: [224, 560]
+  # The 2D spatial size of the input images [height, width].
+  # The model gets the time dimension from `num_frames`.
+  img_size: [224, 560] 
   in_chans: 1
-  num_frames: 16  # <-- ADD THIS LINE
+  patch_size: 16
+  num_frames: 16
+  t_patch_size: 16
   clip_vmax: 3.0
-  normalize: 'frame'
-  random_crop: true
+  normalize: frame
+  random_crop: false
   crop_kwargs:
-    scale: [0.8, 1.0]
-    ratio: [2.4, 2.6]
+    scale: [0.9, 1.0]
+    ratio: [2.5, 2.5]
+    interpolation: 3
+
+# --- Model Config ---
+model:
+  contrastive_mode: simclr
+  backbone_name: mae_vit_base
+  mask_ratio: 0.9
+  temperature: 0.1
+  
+  # Arguments passed to the backbone model constructor.
+  # Architectural details like embed_dim are set by the `backbone_name` preset.
+  backbone_kwargs:
+    pos_embed: sep
+    class_token: true
+    drop_path_rate: 0.0
+    
+  # Arguments passed to the projection/prediction head constructors.
+  head_kwargs:
+    hidden_dim: 2048
+    out_dim: 128
 
 # --- Datasets ---
-# Using the full dataset definitions from the MAE config
-train_dataset: 'hcp-flat'
-
-eval_datasets: ['hcp-val', 'nsd-val'] # Evaluate on both in-domain and out-of-domain data
-
+# Replace the placeholder paths with the actual locations of your datasets.
 datasets:
-  hcp-flat:
+  hcp-train:
     type: flat-wds
-    # This now uses brace expansion to read all 100 local files.
-    url: "datasets/hcp-flat/hcp-flat_{0000..0099}.tar"
+    url: "path/to/your/hcp-flat/hcp-flat_{0000..1799}.tar"
     clipping: random
-    clipping_kwargs: {oversample: 4.0} # Oversample to get more data per epoch
+    clipping_kwargs: {oversample: 4.0}
     shuffle: true
     buffer_size: 1000
-    # Update samples per epoch: ~100 samples/shard * 100 shards = 10000
-    samples_per_epoch: 10000
+    samples_per_epoch: 200000
+
+  hcp-train-subset:
+    type: flat-clips
+    root: "path/to/your/flat-clips/hcp-train-clips-16t"
+    shuffle: false
 
   hcp-val:
     type: flat-clips
-    root: "/teamspace/gcs_folders/share/fmri-fm/datasets/flat-clips/hcp-val-clips-16t" # Assumes this path on Lightning
+    root: "path/to/your/flat-clips/hcp-val-clips-16t"
     shuffle: false
 
   nsd-val:
     type: flat-clips
-    root: "/teamspace/gcs_folders/share/fmri-fm/datasets/flat-clips/nsd-subj01-clips-16t" # Assumes this path on Lightning
+    root: "path/to/your/flat-clips/nsd-subj01-clips-16t"
     shuffle: false
 
-# --- Model Configuration (Specific to our ContrastiveModel) ---
-model:
-  contrastive_mode: "simclr" # Can be switched to "simsiam"
-  mask_ratio: 0.0 # IMPORTANT: Set to 0.0 for standard SimCLR, which doesn't use masking in the encoder
-  temperature: 0.1 # A common temperature for SimCLR
+# Which datasets to use for training and evaluation.
+train_dataset: hcp-train
+eval_datasets: 
+  - hcp-val
+  - nsd-val
 
-  # Define the backbone to use
-  backbone_name: "mae_vit_small"
-  backbone_kwargs: {}
-    # Add other ViT-Base specific args if needed
+# --- Data Loader ---
+num_workers: 8
 
-  # Define the projection head architecture
-  head_kwargs:
-    simclr_head_kwargs:
-      hidden_dim: 4096 # Example hidden dimension
-      out_dim: 128    # Standard output dimension for SimCLR
-
-# --- Optimization Configuration ---
+# --- Optimization ---
 optim:
   epochs: 100
-  batch_size: 128 # A realistic batch size for a single large GPU
+  batch_size: 32
   accum_iter: 1
   base_lr: 1e-3
-  lr: null # Let the script calculate the final LR based on batch size
   min_lr: 0.0
-  warmup_epochs: 10
+  warmup_epochs: 5
+  start_warmup_lr: 1e-6
   weight_decay: 0.05
   betas: [0.9, 0.95]
+  clip_grad: 1.0
 
-# --- General Settings ---
-num_workers: 8
+# --- Training Settings ---
 amp: true
-amp_dtype: float16  # <-- ADD THIS LINE
-seed: 42
-start_epoch: 0
-checkpoint_period: 10 # Save a checkpoint every 10 epochs
-device: 'cuda'
-ckpt: null  # <-- ADD THIS LINE
+amp_dtype: float16
 
+# --- Checkpointing ---
+ckpt: null
+resume: true
+auto_resume: true
+start_epoch: 0
+max_checkpoints: 1
+checkpoint_period: 1
+
+# --- Misc ---
+device: cuda
+seed: 7338
+debug: false
 
 # --- Logging ---
 wandb: true
-wandb_entity: "medarc" # Use the team's entity
-wandb_project: "fMRI-foundation-model"
+wandb_entity: null
+wandb_project: fMRI-foundation-model
