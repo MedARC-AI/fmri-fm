@@ -171,6 +171,21 @@ def main(args: DictConfig):
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     total_iters = args.epochs * (num_batches_train)
+
+    # Helper to allow epoch-based schedule configs. Supports keys like
+    #   warmup_epochs / warmup_iters and freeze_epochs / freeze_iters.
+    def _sched_iters(cfg, key: str, default_iters: int) -> int:
+        try:
+            if isinstance(cfg, dict):
+                iters_key = f"{key}_iters"
+                epochs_key = f"{key}_epochs"
+                if iters_key in cfg:
+                    return int(cfg[iters_key])
+                if epochs_key in cfg:
+                    return int(cfg[epochs_key]) * num_batches_train
+        except Exception:
+            pass
+        return default_iters
     lr_sched_cfg = getattr(args, "lr_schedule", {})
     try:
         lr_sched_cfg = OmegaConf.to_container(lr_sched_cfg, resolve=True)
@@ -182,8 +197,8 @@ def main(args: DictConfig):
         base_value=float(lr_sched_cfg.get("base_value", args.lr)),
         final_value=float(lr_sched_cfg.get("final_value", args.min_lr)),
         total_iters=total_iters,
-        warmup_iters=int(lr_sched_cfg.get("warmup_iters", int(args.warmup_epochs * num_batches_train))),
-        freeze_iters=int(lr_sched_cfg.get("freeze_iters", 0)),
+        warmup_iters=_sched_iters(lr_sched_cfg, "warmup", int(args.warmup_epochs * num_batches_train)),
+        freeze_iters=_sched_iters(lr_sched_cfg, "freeze", 0),
         truncate_cos=float(lr_sched_cfg.get("truncate_cos", 1.0)),
     )
     _ms_cfg = getattr(args, "momentum_schedule", {})
@@ -197,20 +212,26 @@ def main(args: DictConfig):
         base_value=float(_ms_cfg.get("base_value", 0.999)),
         final_value=float(_ms_cfg.get("final_value", 1.0)),
         total_iters=total_iters,
-        warmup_iters=int(_ms_cfg.get("warmup_iters", int(args.warmup_epochs * num_batches_train))),
+        warmup_iters=_sched_iters(_ms_cfg, "warmup", int(args.warmup_epochs * num_batches_train)),
         start_warmup_value=float(_ms_cfg.get("start_warmup_value", 1.0)),
-        freeze_iters=int(_ms_cfg.get("freeze_iters", 0)),
+        freeze_iters=_sched_iters(_ms_cfg, "freeze", 0),
         truncate_cos=float(_ms_cfg.get("truncate_cos", 1.0)),
     )
     co_sched_cfg = getattr(getattr(getattr(args, "capi", None), "clustering_optimizer", None), "lr_schedule", None)
+    try:
+        co_sched_cfg = OmegaConf.to_container(co_sched_cfg, resolve=True)
+    except Exception:
+        pass
+    if not isinstance(co_sched_cfg, dict):
+        co_sched_cfg = {}
     cluster_lr_sched = WarmupThenCosine(
-        base_value=float(getattr(co_sched_cfg, "base_value", args.lr * 0.5)),
-        final_value=float(getattr(co_sched_cfg, "final_value", 0.0)),
+        base_value=float(co_sched_cfg.get("base_value", args.lr * 0.5)),
+        final_value=float(co_sched_cfg.get("final_value", 0.0)),
         total_iters=total_iters,
-        warmup_iters=int(getattr(co_sched_cfg, "warmup_iters", int(args.warmup_epochs * num_batches_train))),
-        start_warmup_value=float(getattr(co_sched_cfg, "start_warmup_value", 0.0)),
-        freeze_iters=int(getattr(co_sched_cfg, "freeze_iters", 0)),
-        truncate_cos=float(getattr(co_sched_cfg, "truncate_cos", 1.0)),
+        warmup_iters=_sched_iters(co_sched_cfg, "warmup", int(args.warmup_epochs * num_batches_train)),
+        start_warmup_value=float(co_sched_cfg.get("start_warmup_value", 0.0)),
+        freeze_iters=_sched_iters(co_sched_cfg, "freeze", 0),
+        truncate_cos=float(co_sched_cfg.get("truncate_cos", 1.0)),
     )
 
     st_sched_cfg = getattr(getattr(args, "capi", None), "student_temp_schedule", None)
@@ -224,9 +245,9 @@ def main(args: DictConfig):
             base_value=float(st_sched_cfg.get("base_value", args.capi.student_temp)),
             final_value=float(st_sched_cfg.get("final_value", args.capi.student_temp)),
             total_iters=total_iters,
-            warmup_iters=int(st_sched_cfg.get("warmup_iters", 0)),
+            warmup_iters=_sched_iters(st_sched_cfg, "warmup", 0),
             start_warmup_value=float(st_sched_cfg.get("start_warmup_value", 0.0)),
-            freeze_iters=int(st_sched_cfg.get("freeze_iters", 0)),
+            freeze_iters=_sched_iters(st_sched_cfg, "freeze", 0),
             truncate_cos=float(st_sched_cfg.get("truncate_cos", 1.0)),
         )
         if isinstance(st_sched_cfg, dict)
@@ -250,9 +271,9 @@ def main(args: DictConfig):
             base_value=float(cfg.get("base_value", default_val)),
             final_value=float(cfg.get("final_value", default_val)),
             total_iters=total_iters,
-            warmup_iters=int(cfg.get("warmup_iters", 0)),
+            warmup_iters=_sched_iters(cfg, "warmup", 0),
             start_warmup_value=float(cfg.get("start_warmup_value", 0.0)),
-            freeze_iters=int(cfg.get("freeze_iters", 0)),
+            freeze_iters=_sched_iters(cfg, "freeze", 0),
             truncate_cos=float(cfg.get("truncate_cos", 1.0)),
         )
 
