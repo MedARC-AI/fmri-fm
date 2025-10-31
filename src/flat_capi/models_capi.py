@@ -507,3 +507,29 @@ def vit_l14_capi(**kwargs) -> EncoderDecoder:
     return model
 
 
+def vit_b16_capi(**kwargs) -> EncoderDecoder:
+    transformers_kwargs = kwargs.get("transformers_kwargs", {})
+    transformers_kwargs.setdefault("embed_dim", 768)
+    transformers_kwargs.setdefault("drop_path_rate", 0.2)
+    transformers_kwargs.setdefault("block_kwargs", {"attn_kwargs": {"num_heads": 12}})
+    encoder_kwargs = kwargs.get("encoder_kwargs", {"depth": 12})
+    decoder_kwargs = kwargs.get("decoder_kwargs", {"depth": 6})
+    model = EncoderDecoder(
+        patch_size=kwargs.get("patch_size", 16),
+        in_chans=kwargs.get("in_chans", 3),
+        transformers_kwargs=transformers_kwargs,
+        encoder_kwargs=encoder_kwargs,
+        decoder_kwargs=decoder_kwargs,
+        out_layer=kwargs.get("out_layer", -1),
+    )
+    return model
+
+
+def vit_l16_capi(**kwargs) -> EncoderDecoder:
+    """Alias for ViT-L with patch size 16 by default.
+    If patch_size is provided in kwargs, it is respected.
+    """
+    if "patch_size" not in kwargs:
+        kwargs["patch_size"] = 16
+    return vit_l14_capi(**kwargs)
+
