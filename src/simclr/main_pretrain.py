@@ -6,6 +6,7 @@ import random
 import time
 from pathlib import Path
 import math
+from webdataset import WebLoader
 
 import numpy as np
 import torch
@@ -27,10 +28,10 @@ import flat_mae.models_mae as models_mae
 
 PROJECT = "fMRI-foundation-model"
 
-
 BACKBONE_MODELS_DICT = models_mae.__dict__
 
 def main(args: DictConfig):
+
     ut.init_distributed_mode(args)
     global_rank = ut.get_rank()
     is_master = global_rank == 0
@@ -50,7 +51,12 @@ def main(args: DictConfig):
     print(f"pretraining with {args.model.contrastive_mode}")
     print("config:", OmegaConf.to_yaml(args), sep="\n")
 
-    train_loader, eval_loaders = create_data_loaders(args)
+    train_loader, eval_loaders, samplers = make_data_loaders(args)
+
+
+
+
+
 
     print(f"Creating backbone: {args.model.backbone_name}")
     backbone = BACKBONE_MODELS_DICT[args.model.backbone_name](
@@ -58,10 +64,16 @@ def main(args: DictConfig):
         in_chans=args.data.in_chans,
         **args.model.get("backbone_kwargs", {}),
     )
+
+
+    backbone_embed_dim = backbone.encoder.patch_embed.out_features
+    print(f"Backbone created with embedding dimension: {backbone_embed_dim}")
+
+
     model = ContrastiveModel(
         backbone=backbone,
         mode=args.model.contrastive_mode,
-        embed_dim=args.model.backbone_kwargs.embed_dim,
+        embed_dim=backbone_embed_dim,
         model_kwargs=args.model.get("head_kwargs"),
     ).to(device)
 
@@ -104,7 +116,8 @@ def main(args: DictConfig):
             ut.save_model(args, epoch, model_without_ddp, optimizer, loss_scaler)
 
 
-def create_data_loaders(args: DictConfig):
+
+def make_data_loaders(args: DictConfig):
     base_transform = flat_data.make_flat_transform(
         img_size=args.data.img_size,
         clip_vmax=args.data.get("clip_vmax"),
@@ -112,30 +125,69 @@ def create_data_loaders(args: DictConfig):
         random_crop=args.data.get("random_crop", False),
         crop_kwargs=args.data.get("crop_kwargs"),
     )
-
     transform = SimCLRTransform(base_transform)
 
     data_loaders = {}
-    dataset_names = [args.train_dataset] + args.eval_datasets
-    for name in dataset_names:
-        config = args.datasets[name]
-        dataset = flat_data.FlatClipsDataset(root=config.root, transform=transform)
-        sampler = DistributedSampler(dataset, shuffle=config.shuffle) if args.distributed else None
-
-        loader = flat_data.DataLoader(
-            dataset, batch_size=args.optim.batch_size,
-            collate_fn=simclr_collate, sampler=sampler,
-            shuffle=sampler is None and config.shuffle,
-            num_workers=args.num_workers, pin_memory=True, drop_last=True
-        )
-        data_loaders[name] = loader
+    samplers = {}
     
-    train_loader = data_loaders.pop(args.train_dataset)
-    return train_loader, data_loaders
 
+    world_size = ut.get_world_size()
+
+    all_dataset_names = [args.train_dataset] + args.eval_datasets
+    
+    for dataset_name in all_dataset_names:
+        if not dataset_name: continue
+
+        dataset_config = args.datasets[dataset_name].copy()
+        print(f"loading dataset: {dataset_name}\n\n{OmegaConf.to_yaml(dataset_config)}")
+
+        dataset_type = dataset_config.pop("type")
+
+        if dataset_type == "flat-wds":
+            samples_per_epoch = dataset_config.pop("samples_per_epoch")
+            dataset = flat_data.make_flat_wds_dataset(
+                num_frames=args.data.num_frames, **dataset_config
+            )
+            dataset = dataset.map(transform)
+            sampler = None
+            shuffle = False
+        
+        elif dataset_type == "flat-clips":
+            dataset = flat_data.FlatClipsDataset(dataset_config.root, transform=transform)
+            samples_per_epoch = len(dataset)
+            sampler = DistributedSampler(dataset, shuffle=dataset_config.shuffle) if args.distributed else None
+            shuffle = sampler is None and dataset_config.shuffle
+        
+        else:
+            raise ValueError(f"Unknown dataset type {dataset_type}.")
+
+
+        collate_fn = simclr_collate
+
+        loader = WebLoader(
+            dataset,
+            batch_size=args.optim.batch_size,
+            collate_fn=collate_fn,
+            sampler=sampler,
+            shuffle=shuffle,
+            num_workers=args.num_workers,
+            pin_memory=True,
+            drop_last=True,
+        )
+
+        num_batches = samples_per_epoch // (world_size * args.optim.batch_size)
+        loader = loader.with_epoch(num_batches)
+        loader = loader.with_length(num_batches, silent=True)
+
+        data_loaders[dataset_name] = loader
+        samplers[dataset_name] = sampler
+
+    train_loader = data_loaders.pop(args.train_dataset)
+    eval_loaders = data_loaders 
+
+    return train_loader, eval_loaders, samplers
 
 def train_one_epoch(args, model, data_loader, optimizer, loss_scaler, lr_schedule, epoch, device):
-    # --- This is the training engine, adapted for SimCLR/SimSiam ---
     model.train()
     metric_logger = ut.MetricLogger(delimiter="  ")
     header = f'Train: [{epoch}]'

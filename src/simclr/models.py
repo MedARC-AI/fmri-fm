@@ -18,7 +18,7 @@ from simclr.loss import (
 )
 
 class ContrastiveModel(nn.Module):
-    def __init__(self, backbone: MaskedViT, mode: str = "simclr", embed_dim: int = 384):
+    def __init__(self, backbone: MaskedViT, mode: str = "simclr", embed_dim: int = 384, model_kwargs: dict = None):
         super().__init__()
         if mode not in ["simclr", "simsiam"]:
             raise ValueError(f"Invalid contrastive mode: {mode}")

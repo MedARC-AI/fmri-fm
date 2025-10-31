@@ -1,0 +1,94 @@
+# In src/simclr/config/hcp_pretrain.yaml
+
+# A professional config for pre-training SimCLR on the full HCP dataset.
+# Adapted from the flat_mae/config/default_pretrain.yaml.
+
+name: "simclr_pretrain_hcp_100_shards"
+notes: "Pre-training run of SimCLR with a ViT-Small backbone on 100 local shards of the HCP-YA dataset."
+output_dir: "checkpoints/${name}"
+
+# --- Data Configuration ---
+# Inherited from the MAE config
+data:
+  img_size: [224, 560]
+  in_chans: 1
+  num_frames: 16  # <-- ADD THIS LINE
+  clip_vmax: 3.0
+  normalize: 'frame'
+  random_crop: true
+  crop_kwargs:
+    scale: [0.8, 1.0]
+    ratio: [2.4, 2.6]
+
+# --- Datasets ---
+# Using the full dataset definitions from the MAE config
+train_dataset: 'hcp-flat'
+
+eval_datasets: ['hcp-val', 'nsd-val'] # Evaluate on both in-domain and out-of-domain data
+
+datasets:
+  hcp-flat:
+    type: flat-wds
+    # This now uses brace expansion to read all 100 local files.
+    url: "datasets/hcp-flat/hcp-flat_{0000..0099}.tar"
+    clipping: random
+    clipping_kwargs: {oversample: 4.0} # Oversample to get more data per epoch
+    shuffle: true
+    buffer_size: 1000
+    # Update samples per epoch: ~100 samples/shard * 100 shards = 10000
+    samples_per_epoch: 10000
+
+  hcp-val:
+    type: flat-clips
+    root: "/teamspace/gcs_folders/share/fmri-fm/datasets/flat-clips/hcp-val-clips-16t" # Assumes this path on Lightning
+    shuffle: false
+
+  nsd-val:
+    type: flat-clips
+    root: "/teamspace/gcs_folders/share/fmri-fm/datasets/flat-clips/nsd-subj01-clips-16t" # Assumes this path on Lightning
+    shuffle: false
+
+# --- Model Configuration (Specific to our ContrastiveModel) ---
+model:
+  contrastive_mode: "simclr" # Can be switched to "simsiam"
+  mask_ratio: 0.0 # IMPORTANT: Set to 0.0 for standard SimCLR, which doesn't use masking in the encoder
+  temperature: 0.1 # A common temperature for SimCLR
+
+  # Define the backbone to use
+  backbone_name: "mae_vit_small"
+  backbone_kwargs: {}
+    # Add other ViT-Base specific args if needed
+
+  # Define the projection head architecture
+  head_kwargs:
+    simclr_head_kwargs:
+      hidden_dim: 4096 # Example hidden dimension
+      out_dim: 128    # Standard output dimension for SimCLR
+
+# --- Optimization Configuration ---
+optim:
+  epochs: 100
+  batch_size: 128 # A realistic batch size for a single large GPU
+  accum_iter: 1
+  base_lr: 1e-3
+  lr: null # Let the script calculate the final LR based on batch size
+  min_lr: 0.0
+  warmup_epochs: 10
+  weight_decay: 0.05
+  betas: [0.9, 0.95]
+
+# --- General Settings ---
+num_workers: 8
+amp: true
+amp_dtype: float16  # <-- ADD THIS LINE
+seed: 42
+start_epoch: 0
+checkpoint_period: 10 # Save a checkpoint every 10 epochs
+device: 'cuda'
+ckpt: null  # <-- ADD THIS LINE
+
+
+# --- Logging ---
+wandb: true
+wandb_entity: "medarc" # Use the team's entity
+wandb_project: "fMRI-foundation-model"
