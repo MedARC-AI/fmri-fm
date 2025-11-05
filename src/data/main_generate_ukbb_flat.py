@@ -230,6 +230,12 @@ def preprocess_series(
     # Apply vertex mask.
     series = series[:, mask]
 
+    # Find vertices with missing data.
+    valid_mask = np.std(series, axis=0) > EPS
+    invalid_count = np.sum(~valid_mask)
+    if invalid_count > 0:
+        _logger.warning(f"Data contains {invalid_count} vertices with missing data.")
+
     # Standard scale.
     series = scale(series)
 
@@ -239,9 +245,15 @@ def preprocess_series(
     # Transform to flat map space.
     series = resampler.transform(series, interpolation="linear")
 
+    # Mask out invalid values in flat map space.
+    valid_mask = resampler.transform(valid_mask, interpolation="nearest")
+    series = valid_mask * series
+
     # Data checks.
     assert not np.any(np.isnan(series)), "series contains nan"
-    assert np.all((series == 0) == ~resampler.mask_), "unexpected sparsity pattern"
+    assert np.all((series != 0) == valid_mask), "unexpected sparsity pattern"
+    assert valid_mask[~resampler.mask_].sum() == 0, "unexpected sparsity pattern"
+    assert valid_mask[resampler.mask_].mean() > 0.99, "too many missing values"
     vmax = np.max(np.abs(series))
     assert vmax < 100, f"series contains large values {vmax=:.3f}"
 
