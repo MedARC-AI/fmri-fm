@@ -122,5 +122,13 @@ datasets:
       oversample: 0.66
     select_files_pattern: "*task-REST2*"
 
+  ukbb-train-clips-mini-16t:
+    url: pipe:aws s3 cp s3://sophont/fmri-fm/datasets/ukbb-flat/ukbb-flat_{00000..00009}.tar -
+    clipping: random
+
+  ukbb-val-clips-mini-16t:
+    url: pipe:aws s3 cp s3://sophont/fmri-fm/datasets/ukbb-flat/ukbb-flat_{04000..04009}.tar -
+    clipping: random
+
 # By default generate all datasets.
 include_datasets: null
