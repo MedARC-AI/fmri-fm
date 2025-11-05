@@ -50,6 +50,7 @@ def make_flat_wds_dataset(
     # see webdataset FAQ: https://github.com/webdataset/webdataset/blob/main/FAQ.md
     dataset = wds.WebDataset(
         expand_urls(url),
+        handler=warn_and_continue,
         resampled=shuffle,
         shardshuffle=False,
         nodesplitter=wds.split_by_node,
@@ -94,6 +95,14 @@ def expand_urls(urls: str | list[str]) -> list[str]:
             result = [url]
         results.extend(result)
     return results
+
+
+def warn_and_continue(exn):
+    # modified wds warn and continue handler to send warning to stdout log.
+    # but note, since this won't propagate to the wandb console log since it will
+    # originate in a child data loader worker process.
+    print(f"WARNING {repr(exn)}")
+    return True
 
 
 class FlatClipsDataset(Dataset):
