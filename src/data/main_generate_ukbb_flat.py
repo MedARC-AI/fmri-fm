@@ -136,7 +136,8 @@ def main(
                 for sample in create_samples(
                     path, mask=mask, resampler=resampler, new_tr=cfg.target_tr
                 ):
-                    sink.write(sample)
+                    if sample is not None:
+                        sink.write(sample)
 
         _logger.info(f"Saving output: {outpath}")
         with tmp_outpath.open("rb") as fsrc:
@@ -156,13 +157,17 @@ def create_samples(
         metadata = parse_ukbb_metadata(path, filename)
         key = "sub-{sub}_ses-{ses}_mod-{mod}".format(**metadata)
 
-        series = preprocess_series(
-            series,
-            mask=mask,
-            resampler=resampler,
-            tr=UKBB_TR,
-            new_tr=new_tr,
-        )
+        try:
+            series = preprocess_series(
+                series,
+                mask=mask,
+                resampler=resampler,
+                tr=UKBB_TR,
+                new_tr=new_tr,
+            )
+        except AssertionError as exc:
+            _logger.warning(f"Preprocessing error for {path}:\n{repr(exc)}")
+            yield None
 
         metadata["n_frames"] = len(series)
 
