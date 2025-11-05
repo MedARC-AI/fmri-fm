@@ -123,6 +123,7 @@ class FlatClipsDataset(Dataset):
 
 def maybe_download(url: str, cache_dir: str | Path | None = None) -> Path:
     cache_dir = Path(cache_dir or DATA_CACHE_DIR)
+    cache_dir.mkdir(exist_ok=True)
 
     parsed = urlparse(url)
     if parsed.scheme == "hf":
@@ -138,7 +139,7 @@ def maybe_download(url: str, cache_dir: str | Path | None = None) -> Path:
         local_path = Path(local_path)
     elif parsed.scheme == "s3":
         path = CloudPath(url)
-        local_path = Path(DATA_CACHE_DIR) / path.name
+        local_path = Path(cache_dir) / path.name
         if not local_path.exists():
             path.download_to(local_path)
     else:
