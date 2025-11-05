@@ -6,9 +6,11 @@
 import fnmatch
 import inspect
 import json
+import os
 from glob import glob
 from functools import partial
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Any, Callable, Iterable, Literal
 
 import braceexpand
@@ -20,6 +22,10 @@ import torchvision.tv_tensors as tvt
 import scipy.sparse
 import webdataset as wds
 from torch.utils.data import Dataset
+from cloudpathlib import CloudPath
+from huggingface_hub import snapshot_download
+
+DATA_CACHE_DIR = os.getenv("DATA_CACHE_DIR", "/tmp/datasets")
 
 
 def make_flat_wds_dataset(
@@ -100,7 +106,7 @@ class FlatClipsDataset(Dataset):
         root: str | Path,
         transform: Callable[[dict[str, Any]], dict[str, Any]] = None,
     ):
-        self.root = Path(root)
+        self.root = maybe_download(root)
         self.files = sorted(p.name for p in self.root.glob("*.pt"))
         self.transform = transform
 
@@ -113,6 +119,32 @@ class FlatClipsDataset(Dataset):
 
     def __len__(self):
         return len(self.files)
+
+
+def maybe_download(url: str, cache_dir: str | Path | None = None) -> Path:
+    cache_dir = Path(cache_dir or DATA_CACHE_DIR)
+
+    parsed = urlparse(url)
+    if parsed.scheme == "hf":
+        path = Path(parsed.path)
+        repo_id = f"{parsed.netloc}{path.parents[-2]}"
+        subfolder = path.relative_to(path.parents[-2])
+        local_path = snapshot_download(
+            repo_id=repo_id,
+            allow_patterns=f"{subfolder}/**",
+            repo_type="dataset",
+            cache_dir=cache_dir,
+        )
+        local_path = Path(local_path)
+    elif parsed.scheme == "s3":
+        path = CloudPath(url)
+        local_path = Path(DATA_CACHE_DIR) / path.name
+        if not local_path.exists():
+            path.download_to(local_path)
+    else:
+        assert not parsed.scheme, f"invalid url scheme {parsed.scheme}"
+        local_path = Path(url)
+    return local_path
 
 
 def extract_flat_sample(sample: dict[str, Any]):
