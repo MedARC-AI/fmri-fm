@@ -11,6 +11,7 @@ import shutil
 import tempfile
 import warnings
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import nibabel as nib
@@ -18,7 +19,7 @@ import numpy as np
 import scipy.sparse
 import webdataset as wds
 import yaml
-from cloudpathlib import AnyPath
+from cloudpathlib import AnyPath, CloudPath
 from omegaconf import OmegaConf
 from tqdm import tqdm
 from sklearn.preprocessing import scale
@@ -131,7 +132,7 @@ def main(
 
         # Generate wds samples.
         with wds.TarWriter(str(tmp_outpath), encoder=False) as sink:
-            for path in tqdm(shard_ses_paths):
+            for path in tqdm(prefetch(shard_ses_paths), total=len(shard_ses_paths)):
                 for sample in create_samples(
                     path, mask=mask, resampler=resampler, new_tr=cfg.target_tr
                 ):
@@ -267,6 +268,18 @@ def encode_sparse_npz(data: scipy.sparse.coo_array) -> bytes:
         scipy.sparse.save_npz(f, data, compressed=False)
         buf = f.getvalue()
     return buf
+
+
+def prefetch(paths: list[AnyPath]):
+    with tempfile.TemporaryDirectory(prefix="prefetch-") as tmpdir:
+
+        def fn(path: AnyPath):
+            if isinstance(path, CloudPath):
+                path = path.download_to(AnyPath(tmpdir) / path.name)
+            return path
+
+        with ThreadPoolExecutor(1) as executor:
+            yield from executor.map(fn, paths)
 
 
 if __name__ == "__main__":
