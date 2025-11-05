@@ -1,6 +1,6 @@
 # Source and output dataset paths.
-ukbb_dir: datasets/UKBB
-out_dir: datasets/ukbb-flat
+ukbb_dir: s3://ukbb
+out_dir: s3://sophont/fmri-fm/datasets/ukbb-flat
 
 # Number of sessions per shard.
 # Each session has 1 or 2 runs (rfMRI and tfMRI).

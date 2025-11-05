@@ -145,7 +145,7 @@ def main(
     # Load flat map surface and cortex mask.
     surf = ut.load_flat("32k_fs_LR", hemi_padding=cfg.hemi_padding)
 
-    roi_img = nib.load(args.roi_path)
+    roi_img = nib.load(cfg.roi_path)
     roi_mask = ut.get_cifti_surf_data(roi_img)
     roi_mask = roi_mask.flatten().astype(int) > 0
     surf, mask = ut.extract_valid_flat(surf, roi_mask)
