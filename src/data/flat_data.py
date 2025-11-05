@@ -152,7 +152,7 @@ def extract_flat_sample(sample: dict[str, Any]):
     meta = sample["meta.json"]
 
     # task trial events in BIDS events format.
-    events = sample["events.json"]
+    events = sample.get("events.json", [])
 
     # sparse data mask.
     mask = sample["mask.npz"]
