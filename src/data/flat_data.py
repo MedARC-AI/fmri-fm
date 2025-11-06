@@ -60,7 +60,9 @@ def make_flat_wds_dataset(
         nodesplitter=wds.split_by_node,
         select_files=select_files,
     )
-    dataset = dataset.decode().map(extract_flat_sample)
+    # when streaming from s3, we can sometimes get KeyError due to incomplete shards (I guess?)
+    # in any case, just ignore with the warn and continue handler
+    dataset = dataset.decode().map(extract_flat_sample, handler=warn_and_continue)
 
     # generate clips before shuffling for slightly better mixing.
     clipping_kwargs = clipping_kwargs or {}
@@ -103,7 +105,7 @@ def expand_urls(urls: str | list[str]) -> list[str]:
 
 def warn_and_continue(exn):
     # modified wds warn and continue handler to send warning to stdout log.
-    # but note, since this won't propagate to the wandb console log since it will
+    # but note, this won't propagate to the wandb console log since it will
     # originate in a child data loader worker process.
     print(f"WARNING {repr(exn)}")
     return True
