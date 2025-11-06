@@ -1,9 +1,23 @@
 from __future__ import annotations
 
+from typing import Mapping, Sequence
+
 import torch
 
 
 def _grid_from_masks(mask_2d: torch.Tensor, patch_size: int) -> torch.Tensor:
+    """Downsample a pixel mask to a patch-level boolean grid.
+
+    Converts a 2D pixel-space mask into a boolean grid indicating which patches contain
+    at least one masked pixel.
+
+    Args:
+        mask_2d: [H, W] mask tensor.
+        patch_size: Size of each square patch in pixels.
+
+    Returns:
+        Bool tensor of shape [H//P, W//P] where True marks a masked patch.
+    """
     H, W = mask_2d.shape
     h, w = H // patch_size, W // patch_size
     mask_2d = mask_2d[: h * patch_size, : w * patch_size]
@@ -13,17 +27,41 @@ def _grid_from_masks(mask_2d: torch.Tensor, patch_size: int) -> torch.Tensor:
 
 
 def collate_data_capi(
-    samples_list,
+    samples_list: Sequence[Mapping[str, torch.Tensor]],
     *,
     img_h: int,
     img_w: int,
     patch_size: int,
     mask_ratio: float | int,
     prediction_subsampling: float | int,
-    dtype,
+    dtype: torch.dtype,
     time_as_channels: bool = False,
     select_frame_index: int = 0,
-):
+) -> dict[str, torch.Tensor]:
+    """Collate fMRI flat-map samples into a CAPI training batch.
+
+    Builds visible/masked token indices and stacks images, supporting both
+    [C, T, H, W] and [C, H, W] inputs. Optionally merges time into channels or
+    selects a specific temporal frame.
+
+    Args:
+        samples_list: Sequence of sample dicts with keys: 'image' and 'mask' or 'img_mask';
+            optional 'visible_mask'.
+        img_h: Target image height.
+        img_w: Target image width.
+        patch_size: Patch size used by the model.
+        mask_ratio: Fraction of eligible patches to mask.
+        prediction_subsampling: Fraction of masked-eligible patches to predict.
+        dtype: Torch dtype of returned tensors.
+        time_as_channels: If True, merge time into the channel dimension.
+        select_frame_index: Temporal index used when not merging time.
+
+    Returns:
+        Dict with:
+          - 'image': [B, C or T, H, W]
+          - 'predict_indices': 1D long indices into the flattened [B*N] patch grid
+          - 'visible_indices': 1D long indices of visible patches in the [B*N] grid
+    """
     batch_size = len(samples_list)
 
     images = []

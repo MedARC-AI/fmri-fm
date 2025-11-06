@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, Callable
 
 import torch
 import wandb
@@ -9,11 +9,13 @@ from torch import Tensor, nn
 from flat_capi.utils import misc
 
 
-def _get_do_teacher(model):
+def _get_do_teacher(model) -> Callable:
+    """Get the teacher forward function, preferring compiled version if present."""
     return getattr(model, "do_teacher_compiled", do_teacher)
 
 
-def _get_do_student(model):
+def _get_do_student(model) -> Callable:
+    """Get the student loss function, preferring compiled version if present."""
     return getattr(model, "do_student_compiled", do_student)
 
 
@@ -25,6 +27,19 @@ def do_student(
     target: Tensor,
     temp: float,
 ) -> Tensor:
+    """Compute the CAPI student loss against teacher targets.
+
+    Args:
+        model: Student-teacher wrapper.
+        images: Input batch [B, C, H, W] (or channels-as-time).
+        predict_indices: Absolute indices of tokens to predict.
+        visible_indices: Absolute indices of visible tokens.
+        target: Teacher assignments used as soft labels.
+        temp: Student softmax temperature.
+
+    Returns:
+        Mean loss tensor (double).
+    """
     core = model.module if hasattr(model, "module") else model
     amp_dtype = images.dtype if images.dtype in (torch.float16, torch.bfloat16) else torch.float32
     enabled = amp_dtype != torch.float32
@@ -44,7 +59,8 @@ def do_teacher(
     model: nn.Module,
     images: Tensor,
     predict_indices: Tensor,
-):
+) -> tuple[Tensor, Tensor]:
+    """Run teacher backbone and clustering head to produce targets and their loss."""
     core = model.module if hasattr(model, "module") else model
     amp_dtype = images.dtype if images.dtype in (torch.float16, torch.bfloat16) else torch.float32
     enabled = amp_dtype != torch.float32
@@ -96,6 +112,11 @@ def train_one_epoch(
     target_temp_sched=None,
     pred_temp_sched=None,
 ):
+    """One training epoch of CAPI pretraining with EMA and clustering head.
+
+    Supports gradient accumulation, temperature schedules, and optional separate
+    optimizer for the clustering head.
+    """
     model.train(True)
     core = model.module if hasattr(model, "module") else model
     student_param_list = list(core.student.parameters())

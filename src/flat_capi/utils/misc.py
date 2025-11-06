@@ -83,6 +83,7 @@ class SmoothedValue:
 
 
 class MetricLogger:
+    """Lightweight metric aggregator with periodic logging and DDP sync."""
     def __init__(self, delimiter="\t"):
         self.meters = defaultdict(SmoothedValue)
         self.delimiter = delimiter

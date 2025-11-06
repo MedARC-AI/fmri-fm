@@ -4,6 +4,11 @@ import numpy as np
 
 
 class WarmupThenCosine:
+    """Cosine schedule with optional freeze and linear warmup phases.
+
+    The schedule concatenates: [freeze_iters of base 0], [linear warmup to base_value],
+    then a cosine decay from base_value to final_value over the remaining steps.
+    """
     def __init__(
         self,
         *,
@@ -33,6 +38,7 @@ class WarmupThenCosine:
         assert len(self.schedule) == self.total_iters
 
     def __getitem__(self, it: int) -> float:
+        """Return the value at iteration index it (clamped after total_iters)."""
         if it >= self.total_iters:
             return self.final_value
         return float(self.schedule[it])

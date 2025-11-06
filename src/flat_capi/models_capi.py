@@ -12,6 +12,7 @@ from torch.nn.parameter import Parameter, UninitializedParameter
 
 
 class Mlp(nn.Module):
+    """Two-layer MLP with GELU used inside transformer blocks."""
     def __init__(
         self,
         in_features: int,
@@ -42,6 +43,7 @@ def rotate_half(x: Tensor) -> Tensor:
 
 
 class Rope(nn.Module):
+    """2D rotary position embedding applied per-head to Q/K projections."""
     def __init__(self, dim: int, max_freq: float | int = 7, min_freq: float | int = 7e-4) -> None:
         super().__init__()
         self.dim = dim
@@ -63,6 +65,7 @@ class Rope(nn.Module):
 
 
 class Attention(nn.Module):
+    """Multi-head attention with optional cross-attention and RoPE."""
     def __init__(
         self,
         dim: int,
@@ -106,6 +109,7 @@ class Attention(nn.Module):
 
 
 class NaiveResidual(nn.Module):
+    """Pre-norm residual wrapper with optional stochastic depth."""
     def __init__(self, drop_prob: float | int, norm: nn.Module, fn: nn.Module):
         super().__init__()
         self.norm = norm
@@ -121,6 +125,7 @@ class NaiveResidual(nn.Module):
 
 
 class EfficientResidual(NaiveResidual):
+    """Residual wrapper that sparsifies forward passes during training for efficiency."""
     def forward(self, x: Tensor, **kwargs: Tensor | None) -> Tensor:
         if self.keep_prob == 1.0 or not self.training:
             return x + self.fn(self.norm(x), **kwargs)
@@ -137,6 +142,7 @@ class EfficientResidual(NaiveResidual):
 
 
 class Block(nn.Module):
+    """Transformer block with attention (with RoPE) and MLP."""
     def __init__(
         self,
         dim: int,
@@ -164,6 +170,7 @@ class Block(nn.Module):
 
 
 class Transformer(nn.Module):
+    """Stack of transformer blocks, returning selected intermediate layers."""
     def __init__(
         self,
         embed_dim: int,
@@ -203,6 +210,7 @@ class Transformer(nn.Module):
 
 
 class EncoderDecoder(nn.Module):
+    """CAPI encoder-decoder backbone producing registers and a feature map."""
     def __init__(
         self,
         patch_size: int = 14,
@@ -354,6 +362,7 @@ def _init_weights(m: nn.Module) -> None:
 
 
 class WeightNorm:
+    """Lightweight functional weight normalization utility."""
     name: str
     dim: int
 
@@ -402,11 +411,13 @@ class WeightNorm:
 
 
 def weight_norm(module: Module, name: str = "weight", dim: int = 0) -> Module:
+    """Apply weight normalization to a module parameter in-place."""
     WeightNorm.apply(module, name, dim)
     return module
 
 
 class L2NormLinear(nn.Module):
+    """Linear layer on L2-normalized inputs; optional weight normalization."""
     def __init__(self, in_dim: int, out_dim: int, *, do_weight_norm: bool = True) -> None:
         super().__init__()
         self.last_layer = nn.Linear(in_dim, out_dim, bias=False)
@@ -431,6 +442,7 @@ exp_max_values = {
 
 
 def stable_exp(M: Tensor) -> Tensor:
+    """Exponentiation stabilized by subtracting the global maximum across ranks."""
     shift = M.max(dim=-2, keepdim=True).values
     if torch.distributed.is_initialized():
         torch.distributed.all_reduce(shift, torch.distributed.ReduceOp.MAX)
@@ -439,6 +451,7 @@ def stable_exp(M: Tensor) -> Tensor:
 
 
 def reduced_sum(*args, **kwargs):
+    """All-reduced sum when distributed, otherwise local sum."""
     summed = torch.sum(*args, **kwargs)
     if torch.distributed.is_initialized():
         torch.distributed.all_reduce(summed)
@@ -447,6 +460,7 @@ def reduced_sum(*args, **kwargs):
 
 @torch.no_grad()
 def sinkhorn_knopp(M: Tensor, n_iterations: int, eps: float | int = 1e-8) -> Tensor:
+    """Stabilized Sinkhorn-Knopp normalization over the last two dims."""
     M = stable_exp(M)
     for _ in range(n_iterations):
         M = M / (reduced_sum(M, dim=-2, keepdim=True) + eps)
@@ -455,6 +469,7 @@ def sinkhorn_knopp(M: Tensor, n_iterations: int, eps: float | int = 1e-8) -> Ten
 
 
 class OnlineClustering(nn.Module):
+    """Online clustering head producing assignments and a contrastive-like loss."""
     def __init__(
         self,
         in_dim: int,
