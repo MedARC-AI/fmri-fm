@@ -38,6 +38,11 @@ _AMP_DTYPE = {
 
 
 def main(args: DictConfig):
+    """Entry point for CAPI pretraining.
+
+    Initializes distributed training, builds the student/teacher model, sets up
+    optimizers and schedules, and runs the training loop with periodic checkpointing.
+    """
     misc.init_distributed_mode(args)
     global_rank = misc.get_rank()
 
@@ -340,7 +345,8 @@ def main(args: DictConfig):
     return [checkpoint_path]
 
 
-def make_data_loader_train(args: DictConfig):
+def make_data_loader_train(args: DictConfig) -> tuple[Iterable, DistributedSampler | None, int]:
+    """Create the training dataloader and sampler for CAPI pretraining."""
     transform = flat_data.make_flat_transform(
         img_size=args.img_size,
         clip_vmax=args.clip_vmax,
@@ -431,6 +437,7 @@ def make_data_loader_train(args: DictConfig):
 
 
 class StudentTeacher(nn.Module):
+    """Simple student/EMA-teacher wrapper with online clustering head."""
     def __init__(self, backbone: nn.Module, args: DictConfig) -> None:
         super().__init__()
         self.student = nn.ModuleDict({})
@@ -455,6 +462,7 @@ class StudentTeacher(nn.Module):
 
 
 def build_student_teacher(backbone: nn.Module, args: DictConfig) -> nn.Module:
+    """Construct the student/teacher wrapper and optionally torch.compile hot paths."""
     model = StudentTeacher(backbone, args)
     if hasattr(torch, "compile") and not getattr(args, "disable_compile", False):
         dynamic = bool(getattr(args, "compile_dynamic", False))

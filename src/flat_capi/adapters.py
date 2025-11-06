@@ -65,6 +65,20 @@ class CapiBackboneAdapter(nn.Module):
         mask: Optional[Tensor] = None,
         mask_ratio: Optional[float] = None,
     ) -> Tuple[Optional[Tensor], Optional[Tensor], Tensor]:
+        """
+        Produce MAE-style token outputs from a CAPI backbone.
+
+        Args:
+            images: Input tensor of shape [B, C, T, H, W] or [B, C, H, W].
+            mask: Optional spatial mask; ignored by this adapter (kept for API parity).
+            mask_ratio: Optional mask ratio; ignored by this adapter (kept for API parity).
+
+        Returns:
+            Tuple of (cls_token, reg_tokens, patch_tokens) where:
+              - cls_token: [B, 1, D] or None if not produced by the backbone
+              - reg_tokens: [B, R, D] or None if not produced/empty
+              - patch_tokens: [B, N, D] flattened from feature map tokens
+        """
         x = self._prepare_inputs(images)
         global_repr, registers, feature_map = self.backbone.forward(x)
         # Shapes:

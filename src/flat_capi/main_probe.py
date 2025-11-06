@@ -31,6 +31,7 @@ DEFAULT_CONFIG = Path(__file__).parent / "config/default_probe.yaml"
 
 
 def main(args: DictConfig):
+    """Run linear-probe evaluation on CAPI backbones or adapters."""
     ut.init_distributed_mode(args)
     global_rank = ut.get_rank()
     is_master = global_rank == 0
@@ -268,7 +269,8 @@ def main(args: DictConfig):
     print(f"done! training time: {datetime.timedelta(seconds=int(total_time))}")
 
 
-def create_data_loaders(args: DictConfig):
+def create_data_loaders(args: DictConfig) -> tuple[DataLoader, DataLoader | None, dict[str, DataLoader]]:
+    """Create train/test/eval DataLoaders for probe experiments."""
     data_loaders = {}
     dataset_names = [args.train_dataset, args.val_dataset, args.test_dataset] + args.eval_datasets
 
@@ -332,6 +334,7 @@ def get_embedding_shapes(
     loader: Iterable,
     device: torch.device,
 ):
+    """Infer output shapes for requested representation sources using one batch."""
     print("running backbone on example batch to get embedding shapes")
     example_batch = next(iter(loader))
     example_batch = ut.send_data(example_batch, device)
