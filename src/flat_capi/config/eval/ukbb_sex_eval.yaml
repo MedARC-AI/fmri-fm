@@ -27,6 +27,10 @@ test_dataset: ukbb-test
 # target_id_map: /teamspace/gcs_folders/share/fmri-fm/datasets/ukbb_sex_target_id_map.json
 # target_key: sub
 
+pretrain_ckpt: /teamspace/studios/this_studio/fmri-fm/checkpoints/pretrain_capi_vit_b_ps16_mae_defaults/checkpoint-last.pth
+
+wandb_project: fMRI-foundation-model-eval
+
 # Number of target classes
 num_classes: 2
 

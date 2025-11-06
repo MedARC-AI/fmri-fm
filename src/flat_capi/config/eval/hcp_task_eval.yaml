@@ -45,4 +45,6 @@ eval_datasets:
 # Number of target classes for classification
 num_classes: 21
 
+pretrain_ckpt: /teamspace/studios/this_studio/fmri-fm/checkpoints/pretrain_capi_vit_b_ps16_mae_defaults/checkpoint-last.pth
 
+wandb_project: fMRI-foundation-model-eval
