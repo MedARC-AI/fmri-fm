@@ -1,5 +1,5 @@
 # Name of the run. For output directory and wandb.
-# CUDA_VISIBLE_DEVICES=1 python -m flat_capi.main_pretrain --cfg-path src/flat_capi/config/pretrain/capi_vit_b_ps16.yaml
+# (CUDA_VISIBLE_DEVICES=1) python -m flat_capi.main_pretrain --cfg-path src/flat_capi/config/pretrain/pretrain_capi_vit_b_ps16.yaml
 name: pretrain_capi_vit_b_ps16_mae_defaults
 
 # Description of the run. Goes in wandb notes.
@@ -50,9 +50,9 @@ capi:
       betas: [0.9, 0.95]
       weight_decay: 0.05
     lr_schedule:
-      base_value: 5.0e-4
+      base_value: 1e-3
       final_value: 0.0
-      warmup_epochs: 25
+      warmup_epochs: 5
       freeze_epochs: 0
       truncate_cos: 1.0
 
@@ -67,16 +67,16 @@ prediction_subsampling: 0.05
 patch_size: 16
 
 # Optimization
-epochs: 250
-batch_size: 256
+epochs: 100
+batch_size: 32
 accum_iter: 1
-base_lr: 5.0e-4 # scaled acc to effective bs (ref bs=256)
+base_lr: 1e-3 # scaled acc to effective bs (ref bs=256)
 min_lr: 0.0
-warmup_epochs: 25
+warmup_epochs: 5
 lr_schedule:
-  base_value: 5.0e-4 # overrides base_lr
+  base_value: 1e-3 # overrides base_lr
   final_value: 0.0
-  warmup_epochs: 25
+  warmup_epochs: 5
   freeze_epochs: 0
   truncate_cos: 1.0
 weight_decay: 0.1
@@ -96,7 +96,7 @@ momentum_schedule:
   final_value: 1.0
   freeze_epochs: 0
   truncate_cos: 1.0
-  warmup_epochs: 25
+  warmup_epochs: 5
 
 # Datasets (maintain archived paths)
 datasets:
@@ -137,7 +137,7 @@ crop_kwargs:
 # Data loader
 num_workers: 16
 
-checkpoint_period: 10
+checkpoint_period: 16 # 100k iters with bs=32, steps_per_epoch=6250
 max_checkpoints: null
 
 # Logging cadence/config
