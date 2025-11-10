@@ -159,7 +159,7 @@ crop_kwargs:
   interpolation: 3  # PIL interp constant, 2=BILINEAR, 3=BICUBIC
 
 # Data loader
-num_workers: 8
+num_workers: 16
 
 # Optimization
 epochs: 100

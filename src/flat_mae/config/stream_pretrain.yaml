@@ -1,8 +1,8 @@
 # Datasets
 datasets:
-  ukbb-train:
+  hcp-train:
     type: flat-wds
-    url: pipe:aws s3 cp s3://sophont/fmri-fm/datasets/ukbb-flat/ukbb-flat_{00000..01799}.tar -
+    url: pipe:aws s3 cp s3://medarc/fmri-fm/datasets/hcp-flat/hcp-flat_{0000..1799}.tar -
     clipping: random
     clipping_kwargs:
       # sample more clips from each series, to saturate the data loader.
@@ -11,14 +11,10 @@ datasets:
     buffer_size: 1000
     samples_per_epoch: 200000
 
-  ukbb-train-subset:
+  hcp-train-subset:
+    # clips from shards {0000..0009} of hcp-flat
     type: flat-clips
-    root: s3://sophont/fmri-fm/datasets/flat-clips/ukbb-train-clips-mini-16t
-    shuffle: false
-
-  ukbb-val:
-    type: flat-clips
-    root: s3://sophont/fmri-fm/datasets/flat-clips/ukbb-val-clips-mini-16t
+    root: s3://medarc/fmri-fm/datasets/flat-clips/hcp-train-clips-16t
     shuffle: false
 
   hcp-val:
@@ -34,11 +30,8 @@ datasets:
     shuffle: false
 
 # which datasets to include
-train_dataset: ukbb-train
+train_dataset: hcp-train
 eval_datasets:
-  - ukbb-train-subset
-  - ukbb-val
+  - hcp-train-subset
   - hcp-val
   - nsd-val
-
-num_workers: 16

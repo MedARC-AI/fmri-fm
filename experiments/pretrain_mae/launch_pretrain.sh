@@ -10,22 +10,24 @@ set -a
 source .env
 set +a
 
-EXP_NAME="pretrain_ukbb"
+EXP_NAME="pretrain_mae"
 EXP_DIR="experiments/${EXP_NAME}"
 OUT_DIR="${EXP_DIR}/checkpoints"
 
+# fill with the name of your home folder on lightning
+SHARE_USER=${SHARE_USER:-volunteer}
+SHARE_DIR="/teamspace/gcs_folders/share/fmri-fm/${SHARE_USER}"
+
 # save output to persistent shared storage
-SHARE_DIR="/teamspace/gcs_folders/share/fmri-fm/connor"
 SHARE_OUT_DIR="${SHARE_DIR}/${OUT_DIR}"
 mkdir -p ${SHARE_OUT_DIR} 2>/dev/null
-ln -s ${SHARE_OUT_DIR} ${OUT_DIR} 2>/dev/null
+ln -sn ${SHARE_OUT_DIR} ${OUT_DIR} 2>/dev/null
 
-name="${EXP_NAME}/01_n1800/pretrain"
+name="${EXP_NAME}/pretrain"
 
 uv run torchrun --standalone --nproc_per_node=1 \
     src/flat_mae/main_pretrain.py \
-    --cfg-path "${EXP_DIR}/pretrain.yaml" \
+    --cfg-path "src/flat_mae/config/stream_pretrain.yaml" \
     --overrides \
     name="${name}" \
-    notes="pretrain on 1800 ukbb shards; stream from r2" \
-    output_dir="${EXP_DIR}/checkpoints"
+    output_dir="${OUT_DIR}"
