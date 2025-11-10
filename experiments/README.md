@@ -21,13 +21,18 @@ SHARE_USER=yourname
 
 # Git settings for pushing commits
 GITHUB_TOKEN="github_pat_XXXX"
-GIT_COMMITTER_EMAIL="your.name@email.com"
+GIT_AUTHOR_NAME="Your Name"
+GIT_COMMITTER_NAME="Your Name"
 GIT_AUTHOR_EMAIL="your.name@email.com"
+GIT_COMMITTER_EMAIL="your.name@email.com"
 
 # R2 data access key
 AWS_ACCESS_KEY_ID="XXXX"
 AWS_SECRET_ACCESS_KEY="XXXX"
 AWS_ENDPOINT_URL_S3="https://XXXX.r2.cloudflarestorage.com"
+
+# Wandb
+WANDB_API_KEY="XXXX"
 
 # Dataset cache directory on local machine storage
 DATA_CACHE_DIR="/tmp/datasets"
@@ -55,7 +60,7 @@ You can also submit batch jobs with the [lightning SDK](https://lightning.ai/doc
 ```python
 from lightning_sdk import Studio, Machine, Job
 
-studio = Studio(name="user-pretrain", teamspace="medarc", org="medarc")
+studio = Studio(name="fmri-fm-pretrain", teamspace="medarc", org="medarc")
 
 job = Job.run(
     command=f"bash fmri-fm/experiments/pretrain_mae/launch_pretrain.sh",

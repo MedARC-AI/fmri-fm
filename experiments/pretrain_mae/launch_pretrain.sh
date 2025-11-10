@@ -21,7 +21,7 @@ SHARE_DIR="/teamspace/gcs_folders/share/fmri-fm/${SHARE_USER}"
 # save output to persistent shared storage
 SHARE_OUT_DIR="${SHARE_DIR}/${OUT_DIR}"
 mkdir -p ${SHARE_OUT_DIR} 2>/dev/null
-ln -s ${SHARE_OUT_DIR} ${OUT_DIR} 2>/dev/null
+ln -sn ${SHARE_OUT_DIR} ${OUT_DIR} 2>/dev/null
 
 name="${EXP_NAME}/pretrain"
 
