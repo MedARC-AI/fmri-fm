@@ -21,7 +21,7 @@ dependencies = [
     "numpy",
     "omegaconf",
     "pre-commit",
-    "pydantic<2.7",  # silence pydantic v2 warning
+    "pydantic<2.7", # silence pydantic v2 warning
     "pytest",
     "pycortex",
     "scikit-learn",
@@ -32,6 +32,8 @@ dependencies = [
     "tqdm",
     "wandb",
     "webdataset",
+    "cloudpathlib[s3]",
+    "lightning-sdk",
 ]
 
 [tool.setuptools_scm]

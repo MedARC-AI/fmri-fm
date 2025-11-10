@@ -6,9 +6,12 @@
 import fnmatch
 import inspect
 import json
+import os
+import subprocess
 from glob import glob
 from functools import partial
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Any, Callable, Iterable, Literal
 
 import braceexpand
@@ -20,6 +23,13 @@ import torchvision.tv_tensors as tvt
 import scipy.sparse
 import webdataset as wds
 from torch.utils.data import Dataset
+from cloudpathlib import CloudPath
+from huggingface_hub import snapshot_download
+from huggingface_hub.utils import disable_progress_bars
+
+DATA_CACHE_DIR = os.getenv("DATA_CACHE_DIR", "/tmp/datasets")
+
+disable_progress_bars()
 
 
 def make_flat_wds_dataset(
@@ -44,12 +54,15 @@ def make_flat_wds_dataset(
     # see webdataset FAQ: https://github.com/webdataset/webdataset/blob/main/FAQ.md
     dataset = wds.WebDataset(
         expand_urls(url),
+        handler=warn_and_continue,
         resampled=shuffle,
         shardshuffle=False,
         nodesplitter=wds.split_by_node,
         select_files=select_files,
     )
-    dataset = dataset.decode().map(extract_flat_sample)
+    # when streaming from s3, we can sometimes get KeyError due to incomplete shards (I guess?)
+    # in any case, just ignore with the warn and continue handler
+    dataset = dataset.decode().map(extract_flat_sample, handler=warn_and_continue)
 
     # generate clips before shuffling for slightly better mixing.
     clipping_kwargs = clipping_kwargs or {}
@@ -90,6 +103,14 @@ def expand_urls(urls: str | list[str]) -> list[str]:
     return results
 
 
+def warn_and_continue(exn):
+    # modified wds warn and continue handler to send warning to stdout log.
+    # but note, this won't propagate to the wandb console log since it will
+    # originate in a child data loader worker process.
+    print(f"WARNING {repr(exn)}")
+    return True
+
+
 class FlatClipsDataset(Dataset):
     """
     Standard folder dataset of pre-extracted fmri flat clips.
@@ -100,7 +121,7 @@ class FlatClipsDataset(Dataset):
         root: str | Path,
         transform: Callable[[dict[str, Any]], dict[str, Any]] = None,
     ):
-        self.root = Path(root)
+        self.root = maybe_download(root)
         self.files = sorted(p.name for p in self.root.glob("*.pt"))
         self.transform = transform
 
@@ -115,12 +136,42 @@ class FlatClipsDataset(Dataset):
         return len(self.files)
 
 
+def maybe_download(url: str, cache_dir: str | Path | None = None) -> Path:
+    cache_dir = Path(cache_dir or DATA_CACHE_DIR)
+    cache_dir.mkdir(exist_ok=True)
+
+    parsed = urlparse(url)
+    if parsed.scheme == "hf":
+        path = Path(parsed.path)
+        repo_id = f"{parsed.netloc}{path.parents[-2]}"
+        subfolder = path.relative_to(path.parents[-2])
+        # TODO: this gives 429 error, too many requests
+        local_path = snapshot_download(
+            repo_id=repo_id,
+            allow_patterns=f"{subfolder}/**",
+            repo_type="dataset",
+            cache_dir=cache_dir,
+        )
+        local_path = Path(local_path)
+    elif parsed.scheme == "s3":
+        path = CloudPath(url)
+        local_path = Path(cache_dir) / path.name
+        subprocess.run(
+            ["aws", "s3", "sync", "--quiet", str(path), str(local_path)],
+            check=True,
+        )
+    else:
+        assert not parsed.scheme, f"invalid url scheme {parsed.scheme}"
+        local_path = Path(url)
+    return local_path
+
+
 def extract_flat_sample(sample: dict[str, Any]):
     # sample metadata
     meta = sample["meta.json"]
 
     # task trial events in BIDS events format.
-    events = sample["events.json"]
+    events = sample.get("events.json", [])
 
     # sparse data mask.
     mask = sample["mask.npz"]

@@ -7,9 +7,11 @@ import argparse
 import io
 import json
 import logging
+import shutil
 import tempfile
 import warnings
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import nibabel as nib
@@ -17,6 +19,7 @@ import numpy as np
 import scipy.sparse
 import webdataset as wds
 import yaml
+from cloudpathlib import AnyPath, CloudPath
 from omegaconf import OmegaConf
 from tqdm import tqdm
 from sklearn.preprocessing import scale
@@ -70,21 +73,23 @@ def main(
         _logger.info(f"Shard {shard_id} greater than total shards {num_shards}; exiting.")
         return
 
-    out_dir = Path(cfg.out_dir)
+    out_dir = AnyPath(cfg.out_dir)
     out_cfg_path = out_dir / "config.yaml"
     if out_cfg_path.exists():
-        prev_cfg = OmegaConf.load(out_cfg_path)
+        with out_cfg_path.open() as f:
+            prev_cfg = OmegaConf.load(f)
         assert cfg.overwrite or prev_cfg == cfg, "Current config doesn't match previous config"
     if shard_id == 0:
         out_dir.mkdir(exist_ok=True)
-        OmegaConf.save(cfg, out_cfg_path)
+        with out_cfg_path.open("w") as f:
+            OmegaConf.save(cfg, f)
 
     outpath = out_dir / f"ukbb-flat_{shard_id:05d}.tar"
     if outpath.exists() and not cfg.overwrite:
         _logger.info(f"Output path exists: {outpath}; skipping")
         return
 
-    ukbb_dir = Path(cfg.ukbb_dir)
+    ukbb_dir = AnyPath(cfg.ukbb_dir)
     bulk_ses_list = np.loadtxt(ukbb_dir / UKBB_BULK_NAME, dtype=str)
     assert len(bulk_ses_list) == UKBB_NUM_SESSIONS, "Unexpected number of sessions"
 
@@ -98,7 +103,7 @@ def main(
         shard_ses_list,
     )
 
-    shard_ses_paths = [ukbb_dir / f"{sub}_{ses}.zip" for sub, ses in shard_ses_list]
+    shard_ses_paths = [ukbb_dir / f"preproc_surface/{sub}_{ses}.zip" for sub, ses in shard_ses_list]
     if not all(p.exists() for p in shard_ses_paths):
         _logger.warning("Some session zip files missing for shard %05d; exiting", shard_id)
         return
@@ -106,7 +111,7 @@ def main(
     # Load flat map surface and cortex mask.
     surf = ut.load_flat("32k_fs_LR", hemi_padding=cfg.hemi_padding)
 
-    roi_img = nib.load(args.roi_path)
+    roi_img = nib.load(cfg.roi_path)
     roi_mask = ut.get_cifti_surf_data(roi_img)
     roi_mask = roi_mask.flatten().astype(int) > 0
     surf, mask = ut.extract_valid_flat(surf, roi_mask)
@@ -122,18 +127,23 @@ def main(
     )
 
     # Temp output path, in case of incomplete processing.
-    tmp_outpath = outpath.parent / f".tmp-{outpath.name}"
-    outpath.parent.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="ukbb-") as tmp_outdir:
+        tmp_outpath = AnyPath(tmp_outdir) / outpath.name
 
-    # Generate wds samples.
-    with wds.TarWriter(str(tmp_outpath), encoder=False) as sink:
-        for path in tqdm(shard_ses_paths):
-            for sample in create_samples(
-                path, mask=mask, resampler=resampler, new_tr=cfg.target_tr
-            ):
-                sink.write(sample)
+        # Generate wds samples.
+        with wds.TarWriter(str(tmp_outpath), encoder=False) as sink:
+            for path in tqdm(prefetch(shard_ses_paths), total=len(shard_ses_paths)):
+                for sample in create_samples(
+                    path, mask=mask, resampler=resampler, new_tr=cfg.target_tr
+                ):
+                    if sample is not None:
+                        sink.write(sample)
 
-    tmp_outpath.rename(outpath)
+        _logger.info(f"Saving output: {outpath}")
+        with tmp_outpath.open("rb") as fsrc:
+            with outpath.open("wb") as fdst:
+                shutil.copyfileobj(fsrc, fdst)
+
     _logger.info(f"Done: {outpath}")
 
 
@@ -147,13 +157,17 @@ def create_samples(
         metadata = parse_ukbb_metadata(path, filename)
         key = "sub-{sub}_ses-{ses}_mod-{mod}".format(**metadata)
 
-        series = preprocess_series(
-            series,
-            mask=mask,
-            resampler=resampler,
-            tr=UKBB_TR,
-            new_tr=new_tr,
-        )
+        try:
+            series = preprocess_series(
+                series,
+                mask=mask,
+                resampler=resampler,
+                tr=UKBB_TR,
+                new_tr=new_tr,
+            )
+        except AssertionError as exc:
+            _logger.warning(f"Preprocessing error for {path}:\n{repr(exc)}")
+            yield None
 
         metadata["n_frames"] = len(series)
 
@@ -271,6 +285,18 @@ def encode_sparse_npz(data: scipy.sparse.coo_array) -> bytes:
         scipy.sparse.save_npz(f, data, compressed=False)
         buf = f.getvalue()
     return buf
+
+
+def prefetch(paths: list[AnyPath]):
+    with tempfile.TemporaryDirectory(prefix="prefetch-") as tmpdir:
+
+        def fn(path: AnyPath):
+            if isinstance(path, CloudPath):
+                path = path.download_to(AnyPath(tmpdir) / path.name)
+            return path
+
+        with ThreadPoolExecutor(1) as executor:
+            yield from executor.map(fn, paths)
 
 
 if __name__ == "__main__":

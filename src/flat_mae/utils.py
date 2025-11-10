@@ -10,6 +10,7 @@
 
 import datetime
 import inspect
+import math
 import os
 import random
 import subprocess
@@ -45,9 +46,11 @@ class SmoothedValue:
         self.fmt = fmt
 
     def update(self, value, n=1):
-        self.deque.append(float(value))
-        self.count += n
-        self.total += value * n
+        value = float(value)
+        if math.isfinite(value):
+            self.deque.append(value)
+            self.count += n
+            self.total += value * n
 
     def synchronize_between_processes(self):
         """
