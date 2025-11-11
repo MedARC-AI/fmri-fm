@@ -25,6 +25,7 @@ from torch import Tensor
 from huggingface_hub import PyTorchModelHubMixin
 from jaxtyping import Float, Int
 from timm.layers import to_2tuple, to_ntuple
+from einops import rearrange
 
 from .modules import (
     Block,
@@ -780,23 +781,38 @@ class MaskedAutoencoderViT(nn.Module, PyTorchModelHubMixin):
         returns:
             denoised_imgs: [N, C, T, H, W] denoised fmri volume
         """
+        # convert input to model's dtype to avoid dtype mismatch
+        model_dtype = next(self.parameters()).dtype
+        imgs = imgs.to(dtype=model_dtype)
+        if img_mask is not None:
+            img_mask = img_mask.to(dtype=model_dtype)
+        
         N, C, T, H, W = imgs.shape
         # if samples is too high, there won't be enough visible patches.
         assert 1 / (n_samples + 1) >= (1 - mask_ratio), (
             "n_samples too large for mask_ratio"
         )
 
-        # get patch dimensions
-        h, w = self.encoder.patchify.grid_size
-        ph, pw = self.encoder.patchify.patch_size
+        # get patch dimensions (extract 2D spatial parts, handling both 2D and 3D cases)
+        grid_size = self.encoder.patchify.grid_size
+        patch_size = self.encoder.patchify.patch_size
+        # for 3D: grid_size is (t, h, w), patch_size is (p_t, p_h, p_w)
+        # for 2D: grid_size is (h, w), patch_size is (p_h, p_w)
+        # we only need spatial dimensions (last 2)
+        h, w = grid_size[-2:]
+        ph, pw = patch_size[-2:]
 
         # we assume a shared img_mask for all samples for simplicity.
         if img_mask is not None:
-            assert img_mask.squeeze().shape == (H, W), (
+            # img_mask should be [H, W] or [1, 1, H, W] or similar
+            img_mask_squeezed = img_mask.squeeze()
+            assert img_mask_squeezed.shape == (H, W), (
                 "denoising requires a fixed image mask"
             )
+            # use rearrange to patchify the spatial mask directly (like old version)
+            # this works with 2D spatial patches regardless of temporal dimension
             patch_mask = rearrange(
-                img_mask.squeeze(), "(h p) (w q) -> (h w) (p q)", h=h, p=ph, w=w, q=pw
+                img_mask_squeezed, "(h p) (w q) -> (h w) (p q)", h=h, p=ph, w=w, q=pw
             )
             patch_mask = patch_mask.sum(dim=-1).clip(max=1)
             img_mask = img_mask.expand_as(imgs)
@@ -823,21 +839,48 @@ class MaskedAutoencoderViT(nn.Module, PyTorchModelHubMixin):
                 patch_permutation,
             )
 
-            prefix, latent, mask, ids_keep = self.forward_encoder(
-                imgs, mask_ratio, run_visible_mask, generator
-            )
-            pred, decoder_mask = self.forward_decoder(
-                latent,
-                mask,
-                ids_keep,
-                decoder_mask_ratio=0.0,
-                img_mask=img_mask,
-                generator=generator,
+            # prepare targets with normalization
+            targets_patches, targets_stats = self.prepare_targets(imgs, img_mask)
+
+            # encode with visible mask
+            cls_embeds, reg_embeds, patch_embeds, visible_mask_out, visible_ids = self.encoder(
+                imgs, mask=run_visible_mask, mask_ratio=None  # use provided mask, no random masking
             )
 
-            # unnormalize prediction before storing
-            pred_unnorm = self.unnormalize(pred)
-            reconstructions.append(pred_unnorm)
+            # prepare prediction mask (predict non-visible patches)
+            pred_mask_patches, pred_ids = self.prepare_pred_mask(
+                visible_mask_out,
+                pred_mask=None,
+                pred_mask_ratio=None,  # predict all non-visible patches
+            )
+
+            # decode
+            preds = self.forward_decoder(patch_embeds, reg_embeds, visible_ids, pred_ids)
+
+            # unnormalize predictions
+            if targets_stats is not None:
+                targets_mean, targets_std = targets_stats
+                # gather stats for predicted patches
+                pred_mean = targets_mean.gather(1, pred_ids.unsqueeze(-1).expand(-1, -1, preds.shape[-1]))
+                pred_std = targets_std.gather(1, pred_ids.unsqueeze(-1).expand(-1, -1, preds.shape[-1]))
+                pred_unnorm = preds * pred_std + pred_mean
+            else:
+                pred_unnorm = preds
+
+            # expand predictions to full patch space for aggregation
+            # pred_unnorm is [N, Q, P], need to expand to [N, N_patches, P]
+            N_patches = self.pred_patchify.num_patches
+            P = pred_unnorm.shape[-1]
+            pred_expanded = torch.zeros((N, N_patches, P), dtype=pred_unnorm.dtype, device=pred_unnorm.device)
+            pred_expanded.scatter_(1, pred_ids.unsqueeze(-1).expand(-1, -1, P), pred_unnorm)
+            
+            # create decoder_mask to track which patches were predicted
+            # use model dtype to ensure compatibility
+            model_dtype = next(self.parameters()).dtype
+            decoder_mask = torch.zeros((N, N_patches), device=pred_ids.device, dtype=model_dtype)
+            decoder_mask.scatter_(1, pred_ids, torch.ones_like(pred_ids, dtype=model_dtype))
+
+            reconstructions.append(pred_expanded)
             decoder_masks.append(decoder_mask)
 
         # aggregate reconstructions using proper weighted mean
@@ -856,10 +899,9 @@ class MaskedAutoencoderViT(nn.Module, PyTorchModelHubMixin):
         final_patches = weighted_sum / weight_sum.clamp(min=1.0)
 
         # convert back to image space using unpatchify
-        # need to call patchify with target frames to set correct patch_info for unpatchify
-        target_imgs = torch.index_select(imgs, 2, self.t_pred_indices)
-        _ = self.patchify(target_imgs)  # sets self.patch_info for prediction dimensions
-        denoised_imgs = self.unpatchify(final_patches)
+        # note: t_pred_stride > 1 is automatically handled by StridedPatchify3D.unpatchify()
+        # which repeats temporal frames to fill all time steps
+        denoised_imgs = self.pred_patchify.unpatchify(final_patches)
 
         return denoised_imgs
 
@@ -883,27 +925,33 @@ class MaskedAutoencoderViT(nn.Module, PyTorchModelHubMixin):
         visible_patch_indices = groups[run_idx]
 
         # Use patch dimensions from the model configuration
-        # Don't call patchify here as it overwrites patch_info
-        ph, pw = self.encoder.patchify.patch_size
-        u = self.encoder.patchify.t_patch_size
-        h = H // ph
-        w = W // pw
-        t = T // u
+        # extract 2D spatial parts (handling both 2D and 3D cases)
+        patch_size = self.encoder.patchify.patch_size
+        grid_size = self.encoder.patchify.grid_size
+        # for 3D: patch_size is (p_t, p_h, p_w), grid_size is (t, h, w)
+        # for 2D: patch_size is (p_h, p_w), grid_size is (h, w)
+        # we only need spatial dimensions (last 2 elements work for both cases)
+        ph, pw = patch_size[-2:]  # spatial patch size
+        h, w = grid_size[-2:]  # spatial grid size
+        # for temporal: if 3D, use first dim; if 2D, assume single frame
+        u = patch_size[0] if len(patch_size) == 3 else 1
+        t = grid_size[0] if len(grid_size) == 3 else 1
 
-        # Create patch_mask in patch space
-        patch_mask = torch.zeros((N, h * w), device=imgs.device, dtype=torch.float32)
+        # Create patch_mask in patch space, matching model's parameter dtype
+        # use the dtype of the first model parameter to ensure compatibility
+        model_dtype = next(self.parameters()).dtype
+        patch_mask = torch.zeros((N, h * w), device=imgs.device, dtype=model_dtype)
         patch_mask[:, visible_patch_indices] = 1.0
         patch_mask = patch_mask.unsqueeze(1).expand(-1, t, -1).flatten(1)
 
         # Expand to include voxel content: (N, t*h*w, u*ph*pw*C)
         patch_mask_expanded = patch_mask.unsqueeze(-1).expand(-1, -1, u * ph * pw * C)
 
-        # Set patch_info for unpatchify
-        # bit of a hack to override the cached patch info here, but the caching itself
-        # is also a hack so..
-        self.patch_info = (N, C, T, H, W, ph, pw, u, t, h, w)
-        visible_mask = self.unpatchify(patch_mask_expanded)
-
+        # use encoder's unpatchify to convert patch mask back to image space
+        # patch ordering matches patchify3d: (t h w) flattened to [t*h*w]
+        visible_mask = self.encoder.patchify.unpatchify(patch_mask_expanded)
+        
+        # mask is already in model_dtype from patch_mask creation, just return it
         return visible_mask
 
 
