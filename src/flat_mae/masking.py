@@ -4,6 +4,7 @@
 # capi: https://github.com/facebookresearch/capi/blob/main/data.py
 
 import torch
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
@@ -78,13 +79,44 @@ class TubeMasking(RandomMasking):
         super().__init__(mask_ratio=mask_ratio, img_size=img_size, patch_size=patch_size)
 
 
-# TODO:
-# - inverse block masking
+def _inverse_block_masking(mask: torch.Tensor, block_size: int = 160) -> torch.Tensor:
+    """Sample a block visible mask."""
+    H, W = mask.shape
+    h_idx = np.random.randint(0, H - block_size)
+    w_idx = np.random.randint(0, W - block_size)
 
+    mask[h_idx : h_idx + block_size, w_idx : w_idx + block_size] = 1
+    return mask
+
+
+class InverseBlockMasking(nn.Module):
+    def __init__(
+        self,
+        img_size: int | tuple[int, int],
+        block_size: int = 160,
+        num_frames: int | None = None,
+        **kwargs,
+    ):
+        super().__init__()
+        img_size = to_2tuple(img_size)
+        if num_frames:
+            img_size = (num_frames, *img_size)
+        self.img_size = img_size
+        self.block_size = block_size
+
+    def forward(
+        self,
+        img_mask: Float[Tensor, "H W"] | None = None,
+        device: torch.device | None = None,
+    ) -> Tensor:
+        """Sample a block visible mask."""
+        mask = torch.zeros(self.img_size, device=device)
+        return _inverse_block_masking(mask, self.block_size)
 
 MASKING_DICT = {
     "random": RandomMasking,
     "tube": TubeMasking,
+    "inverse": InverseBlockMasking,
 }
 
 
