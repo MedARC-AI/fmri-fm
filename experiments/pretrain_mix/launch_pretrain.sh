@@ -33,6 +33,8 @@ ln -sn ${SHARE_OUT_DIR} ${OUT_DIR} 2>/dev/null
 keys=(
     hcp_ukbb_n1800
     hcp_ukbb_n3600
+    hcp_n1800
+    ukbb_n1800
 )
 key=${keys[JOBID]}
 
