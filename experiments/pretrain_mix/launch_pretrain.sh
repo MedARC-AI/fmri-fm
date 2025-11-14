@@ -37,7 +37,9 @@ keys=(
 key=${keys[JOBID]}
 
 name="${EXP_NAME}/${key}/pretrain"
-config="${EXP_DIR}/pretrain_${key}.yaml"
+config="${EXP_DIR}/config/pretrain_${key}.yaml"
+
+notes="hcp ukbb mix pretraining run"
 
 uv run torchrun --standalone --nproc_per_node=1 \
     src/flat_mae/main_pretrain.py \
