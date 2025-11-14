@@ -34,6 +34,8 @@ ln -sn ${SHARE_OUT_DIR} ${OUT_DIR} 2>/dev/null
 keys=(
     hcp_ukbb_n1800
     hcp_ukbb_n3600
+    hcp_n1800
+    ukbb_n1800
 )
 key=${keys[JOBID]}
 
@@ -51,7 +53,7 @@ notes="${task} eval for hcp ukbb mix pretraining run"
 
 ckpt="${EXP_DIR}/checkpoints/${EXP_NAME}/${key}/pretrain/checkpoint-last.pth"
 
-echo uv run torchrun --standalone --nproc_per_node=1 \
+uv run torchrun --standalone --nproc_per_node=1 \
     src/flat_mae/main_probe.py \
     --cfg-path "${config}" \
     --overrides \
