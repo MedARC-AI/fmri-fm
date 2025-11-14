@@ -9,15 +9,15 @@ task: classification
 # Datasets
 datasets:
   ukbb-train:
-    root: s3://medarc/fmri-fm/datasets/flat-clips/ukbb-train-clips-16t
+    root: s3://sophont/fmri-fm/datasets/flat-clips/ukbb-train-clips-16t
     shuffle: true
 
   ukbb-val:
-    root: s3://medarc/fmri-fm/datasets/flat-clips/ukbb-val-clips-16t
+    root: s3://sophont/fmri-fm/datasets/flat-clips/ukbb-val-clips-16t
     shuffle: false
 
   ukbb-test:
-    root: s3://medarc/fmri-fm/datasets/flat-clips/ukbb-test-clips-16t
+    root: s3://sophont/fmri-fm/datasets/flat-clips/ukbb-test-clips-16t
     shuffle: false
 
 # Dataset names for special subsets.
