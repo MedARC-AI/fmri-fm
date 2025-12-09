@@ -1,5 +1,30 @@
 # Experiments
 
+## Experiment contributing guide
+
+Contributed experiments are the "atoms" of a paper. They should include:
+
+- all scripts and configs needed to reproduce results
+- pruned output runs excluding checkpoints, logged images, and other large files
+- notebooks or scripts needed to make publication ready figures or tables
+- the generated publication ready figures/tables themselves
+- a `README.md` with a rough draft writeup of the setup and results (with embedded figures/tables), plus any other documentation.
+
+In addition, full experiment outputs should be backed up to `s3://medarc/fmri-fm/experiments`.
+
+### Experiment contributing workflow
+
+1. Fork the repo and create your branch from `main`.
+2. [Install the project](README.md#installation), including [pre-commit hooks](https://pre-commit.com/#3-install-the-git-hook-scripts).
+3. Copy a recent previous experiment to get the correct structure.
+4. Edit configs and run scripts.
+5. Open a [draft pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-pull-requests#draft-pull-requests) to get feedback on the experiment design.
+6. Run the experiment. Watch the logs/wandb.
+7. Analyze results, make plots/tables.
+8. Write up setup and results in a `README.md`.
+9. Back up results to `s3://medarc/fmri-fm/experiments`.
+10. Update PR and request review.
+
 ## Running batch experiments on lightning
 
 ### 1. Clone the repo to a fresh lightning studio
